@@ -40,6 +40,9 @@ static void usage(void)
 "                    (off by default: board certs pin their enrolment-day address)\n"
 "  --ca-url URL      certificate authority (default %s)\n"
 "  --ca-secret S     CA admin preshared secret, for `enroll`\n"
+"  --debug, -d       show zenoh-pico's DEBUG/INFO lines (a line per frame and keep-alive).\n"
+"                    Off by default; its WARN and ERROR lines are always shown either way.\n"
+"                    QZ_DEBUG=1 does the same.\n"
 "\n"
 "COMMANDS\n"
 "  scan [secs]             find boards by mDNS — no session and no address needed\n"
@@ -224,7 +227,16 @@ int main(int argc, char **argv)
     snprintf(ctx.ca_url, sizeof(ctx.ca_url), "%s", DEFAULT_CA_URL);
     ctx.verify_name = false;
 
+    bool verbose = (getenv("QZ_DEBUG") != NULL && getenv("QZ_DEBUG")[0] == '1');
+
     int i = 1;
+    for (; i < argc; i++) {
+        if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) verbose = true;
+    }
+    /* Before anything can print: this replaces stdout with a filtered pipe. */
+    qz_log_filter_install(verbose);
+
+    i = 1;
     for (; i < argc; i++) {
         if (strcmp(argv[i], "--certs") == 0 && i + 1 < argc)
             expand_home(argv[++i], ctx.certs_dir, sizeof(ctx.certs_dir));
@@ -241,6 +253,7 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--ca-secret") == 0 && i + 1 < argc)
             snprintf(ctx.ca_admin_secret, sizeof(ctx.ca_admin_secret), "%s", argv[++i]);
         else if (strcmp(argv[i], "--verify-name") == 0) ctx.verify_name = true;
+        else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) { /* handled */ }
         else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) { usage(); return 0; }
         else break;
     }

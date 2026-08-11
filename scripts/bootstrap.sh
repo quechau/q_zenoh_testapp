@@ -13,9 +13,10 @@ TP="$HERE/third_party"
 PREFIX="$TP/prefix"
 MBEDTLS_TAG="${MBEDTLS_TAG:-v3.6.2}"
 ZENOH_PICO_TAG="${ZENOH_PICO_TAG:-1.9.0}"
-# zenoh-pico only logs at compile time. Level 1 (errors) is kept on: without it a failed
-# handshake is a silent return code, which is exactly how hours get lost.
-ZENOH_DEBUG="${ZENOH_DEBUG:-1}"
+# zenoh-pico only logs at compile time, so it is built VERBOSE (3) and the app filters at run
+# time instead — see src/logfilter.c. Built any quieter, `--debug` could not turn anything on
+# when something actually goes wrong.
+ZENOH_DEBUG="${ZENOH_DEBUG:-3}"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 
 mkdir -p "$TP"

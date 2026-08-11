@@ -22,6 +22,8 @@ add_executable(q_zenoh_testapp
   src/util.c
   src/ca.c
   src/mdns.c
+  src/logfilter.c
+  src/json.c
 )
 
 # zenoh-pico picks its platform layer from a compile definition; without it every header

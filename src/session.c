@@ -350,6 +350,15 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
     qz_envelope_dump(st.reply, st.reply_len, true, "              ");
 
+    /* The wire dump above proves what arrived; this says what it means. A boardinfo answer is
+     * 141 bytes of nested protobuf, and as a hex preview it tells the reader nothing. */
+    const uint8_t *rsp_payload = NULL;
+    size_t plen = qz_field_bytes(st.reply, st.reply_len, 6, &rsp_payload); /* response payload */
+    if (plen > 0) {
+        qz_log("JSON", "%s payload decoded", service);
+        qz_json_dump(rsp_payload, plen, service, "              ");
+    }
+
     uint64_t err = 0;
     if (qz_field_varint(st.reply, st.reply_len, 7, &err) && err != 0)
         qz_log("ACK", "error code %llu", (unsigned long long)err);

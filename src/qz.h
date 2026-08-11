@@ -55,6 +55,11 @@ typedef struct {
     char ca_admin_secret[128];
 } qz_ctx_t;
 
+/* ----------------------------------------------------------- logfilter.c */
+
+/** Hides zenoh-pico's DEBUG/INFO chatter unless `verbose`. WARN and ERROR always pass. */
+void qz_log_filter_install(bool verbose);
+
 /* ---------------------------------------------------------------- util.c */
 
 void     qz_log(const char *tag, const char *fmt, ...);
@@ -83,6 +88,14 @@ int qz_req_encode(uint8_t *buf, size_t buf_len, const char *service_id, qz_op_t 
 
 /** Prints every top-level field of an envelope, naming the ones we know. */
 void qz_envelope_dump(const uint8_t *buf, size_t len, bool is_response, const char *indent);
+
+/** Renders a protobuf message as readable JSON. Field names are known for a few payload
+ *  types; the rest keep their field number, so the output never invents a label. */
+void qz_json_dump(const uint8_t *buf, size_t len, const char *service, const char *indent);
+
+/** Copies out a length-delimited field. Returns its length, or 0 when absent. */
+size_t qz_field_bytes(const uint8_t *buf, size_t len, uint32_t field,
+                      const uint8_t **out);
 
 /** Pulls one varint field out of an envelope. Returns false when absent. */
 bool qz_field_varint(const uint8_t *buf, size_t len, uint32_t field, uint64_t *out);

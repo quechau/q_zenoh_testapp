@@ -15,7 +15,26 @@ q> login <password>
 q> boardinfo
   ACK  seq=21191  172B  round trip 101 ms
         payload        = <141 B> 0a 8a 01 0a 05 41 43 42 2d 4d …
+  JSON system.boardinfo payload decoded
+        {
+          "info": {
+            "board_name": "ACB-M",
+            "chip_type": "esp32s3",
+            "firmware_version": "0.2.0.0",
+            "supported_transports": { "id": "transport.zenoh", "version": "1.9.0" }
+          }
+        }
 ```
+
+Every reply is shown twice: the envelope field by field, which is the wire truth, and then the
+payload rendered as JSON, which is what it means. A `system.boardinfo` answer is 141 bytes of
+nested protobuf and a hex preview of it says nothing.
+
+The JSON renderer has no generated code and no schema at run time. Varints print as numbers,
+printable byte strings as strings, and anything else is re-parsed as a nested message and
+printed as an object if it parses cleanly to the last byte. Field *names* come from small
+tables for the payloads worth naming; a field with no entry keeps its number, so the output
+never invents a label it cannot justify.
 
 ## Build
 
@@ -33,8 +52,10 @@ is installed system-wide and no root is needed. Two reasons it has to exist:
 * Its CMake finds Mbed TLS through pkg-config rather than fetching it, and most distributions
   do not install the Mbed TLS headers.
 
-It also builds zenoh-pico with `ZENOH_DEBUG=1`. zenoh-pico only logs at compile time, and
-without it a failed handshake is an unexplained return code.
+It builds zenoh-pico with `ZENOH_DEBUG=3`, the most verbose level. zenoh-pico picks its log
+level at compile time, so a quiet build could never be made talkative when something goes
+wrong; instead it is built loud and `src/logfilter.c` drops the DEBUG and INFO lines at run
+time unless `--debug` is given.
 
 ## Use
 
@@ -77,6 +98,11 @@ q> req modbus.points read
 | `boardinfo`, `points` | shorthands for the two common reads |
 | `enroll <id> [SAN]` | get a certificate from the CA and write it into `--certs` |
 | `status`, `help`, `quit` | |
+
+`--debug` (or `QZ_DEBUG=1`) adds zenoh-pico's own DEBUG and INFO lines — a line per frame and
+per keep-alive. It is off by default because it buries everything else and mangles the REPL
+prompt. Its WARN and ERROR lines are never hidden: their absence is what makes a failed
+handshake look like an unexplained return code.
 
 ### Identity
 
@@ -136,6 +162,8 @@ src/session.c   zenoh session, discovery, pub/sub, login, request/reply
 src/proto.c     protobuf encode/decode for the rubix envelopes (no protoc needed)
 src/ca.c        CA enrolment over HTTPS: register, key, CSR, sign
 src/mdns.c      finding boards: mDNS for the name, TCP sweep for the address
+src/json.c      protobuf rendered as readable JSON, inferred rather than generated
+src/logfilter.c keeps zenoh-pico's chatter out of the way unless --debug
 src/util.c      hashing, base64, certificate CN
 proto/          envelope.proto, for reference
 scripts/        bootstrap.sh

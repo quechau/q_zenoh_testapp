@@ -149,3 +149,25 @@ bool qz_field_varint(const uint8_t *buf, size_t len, uint32_t field, uint64_t *o
     }
     return false;
 }
+
+size_t qz_field_bytes(const uint8_t *buf, size_t len, uint32_t field, const uint8_t **out)
+{
+    size_t i = 0;
+    while (i < len) {
+        uint64_t key;
+        if (!get_varint(buf, len, &i, &key)) return 0;
+        uint32_t f = (uint32_t)(key >> 3);
+        uint32_t wt = (uint32_t)(key & 7);
+        if (wt == 2) {
+            uint64_t l;
+            if (!get_varint(buf, len, &i, &l)) return 0;
+            if (i + l > len) return 0;
+            if (f == field) { *out = buf + i; return (size_t)l; }
+            i += l;
+        } else if (wt == 0) { uint64_t v; if (!get_varint(buf, len, &i, &v)) return 0; }
+        else if (wt == 5) i += 4;
+        else if (wt == 1) i += 8;
+        else return 0;
+    }
+    return 0;
+}
