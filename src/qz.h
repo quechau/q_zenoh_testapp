@@ -24,6 +24,7 @@
 typedef struct {
     char     peer_id[QZ_MAX_ID];
     char     nonce[QZ_NONCE_HEX];   /* per-boot, carried in the announce payload */
+    char     addr[64];              /* from mDNS: "tls/<ip>:<port>", "" if unknown */
     uint32_t announces;
     uint64_t last_seen_ms;
 } qz_board_t;
@@ -96,6 +97,10 @@ int qz_ca_enroll(const char *ca_url, const char *admin_secret, const char *id,
                  const char *san, const char *out_dir);
 
 /* -------------------------------------------------------------- session.c */
+
+/** Finds boards on the LAN with an mDNS query for _zenoh._tcp — needs no session and no
+ *  endpoint, which is the point: it is how you learn an address you do not know yet. */
+int  qz_mdns_scan(qz_ctx_t *ctx, unsigned seconds);
 
 int  qz_session_open(qz_ctx_t *ctx);
 void qz_session_close(qz_ctx_t *ctx);

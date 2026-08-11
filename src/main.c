@@ -42,7 +42,8 @@ static void usage(void)
 "  --ca-secret S     CA admin preshared secret, for `enroll`\n"
 "\n"
 "COMMANDS\n"
-"  discover [secs]         listen for rubix/peers/*/announce and list the boards seen\n"
+"  scan [secs]             find boards by mDNS — no session and no address needed\n"
+"  discover [secs]         listen for rubix/peers/*/announce; also reports each auth nonce\n"
 "  use <board-id>          choose which board later commands address\n"
 "  connect [endpoint]      open the mTLS peer session\n"
 "  disconnect              close it\n"
@@ -59,6 +60,8 @@ static void usage(void)
 "  help, quit\n"
 "\n"
 "EXAMPLES\n"
+"  q_zenoh_testapp scan                                     # what is on the LAN?\n"
+"  q_zenoh_testapp boardinfo                                # scans, connects, asks\n"
 "  q_zenoh_testapp --endpoint tls/192.168.10.29:7447 discover 8\n"
 "  q_zenoh_testapp --endpoint tls/192.168.10.29:7447 boardinfo\n"
 "  q_zenoh_testapp --ca-secret $CA_ADMIN enroll q-test-01 IP:192.168.10.39\n"
@@ -83,8 +86,15 @@ static int need_session(qz_ctx_t *ctx)
 {
     if (ctx->session_open) return 0;
     if (ctx->endpoint[0] == '\0') {
-        qz_log("ERR", "no endpoint — pass --endpoint tls/<host>:7447");
-        return -1;
+        /* Rather than telling the operator to go and find an address, go and find it: the
+         * board answers an mDNS browse, and its address comes from DHCP so a remembered one
+         * goes stale anyway. */
+        qz_log("SCAN", "no endpoint set — looking for boards on the LAN first");
+        if (qz_mdns_scan(ctx, 4) <= 0 || ctx->endpoint[0] == '\0') {
+            qz_log("ERR", "no board found. Pass --endpoint tls/<host>:7447, or run `scan` and "
+                          "then `connect <address>`.");
+            return -1;
+        }
     }
     return qz_session_open(ctx);
 }
@@ -115,6 +125,9 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         snprintf(ctx->board, sizeof(ctx->board), "%s", argv[1]);
         qz_log("SELECT", "commands now address %s", ctx->board);
         return 0;
+    }
+    if (strcmp(cmd, "scan") == 0) {
+        return qz_mdns_scan(ctx, argc > 1 ? (unsigned)atoi(argv[1]) : 4) >= 0 ? 0 : -1;
     }
     if (strcmp(cmd, "discover") == 0) {
         if (need_session(ctx) != 0) return -1;

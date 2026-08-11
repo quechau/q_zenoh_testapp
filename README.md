@@ -38,8 +38,19 @@ without it a failed handshake is an unexplained return code.
 
 ## Use
 
+`--endpoint` is optional. With none, any command that needs a session finds the board first:
+
+```bash
+./build/q_zenoh_testapp boardinfo
+#   SCAN    no endpoint set — looking for boards on the LAN first
+#   SCAN    mDNS named: acbm-1cdbd4abbc7c
+#   SELECT  endpoint=tls/192.168.10.29:7447  board=acbm-1cdbd4abbc7c
+#   ACK     seq=29344  172B  round trip 51 ms
+```
+
 ```bash
 # one-shot
+./build/q_zenoh_testapp scan
 ./build/q_zenoh_testapp --endpoint tls/192.168.10.29:7447 discover 8
 ./build/q_zenoh_testapp --endpoint tls/192.168.10.29:7447 boardinfo
 ./build/q_zenoh_testapp --endpoint tls/192.168.10.29:7447 login <password>
@@ -54,6 +65,7 @@ q> req modbus.points read
 
 | Command | What it does |
 | --- | --- |
+| `scan [secs]` | finds boards with no session and no address: mDNS for the name, a TCP sweep for the address |
 | `discover [secs]` | listens on `rubix/peers/*/announce`, lists boards **and their nonce** |
 | `use <board-id>` | choose which board later commands address |
 | `connect [endpoint]` / `disconnect` | open or close the mTLS peer session |
@@ -103,6 +115,15 @@ decode, the board resets the envelope to zeros, and the request arrives with an 
 `client_id` and is refused as a certificate mismatch. The error you see accuses the wrong
 thing entirely.
 
+**Discovery cannot trust who sent an mDNS reply.** Replies are multicast and other hosts
+re-announce records they have cached, so the sender is often not the owner — measured here, a
+reply carrying the board's records came from a different machine, and dialling that machine
+got connection refused. `scan` therefore takes only the *name* from mDNS and finds the
+*address* by sweeping the local subnets for something listening on 7447. It sweeps every
+interface, not the first one: the board is regularly not on the interface that sorts first,
+which is the same trap that makes the Control Engine adopt the wrong identity when an Ethernet
+cable is plugged into a WiFi host.
+
 **The login nonce is per boot.** It is carried in the announce beacon, which is why `login`
 runs `discover` first if it has to. A nonce cached across a board reboot silently produces a
 wrong proof.
@@ -114,6 +135,7 @@ src/main.c      argument handling, one-shot commands, REPL
 src/session.c   zenoh session, discovery, pub/sub, login, request/reply
 src/proto.c     protobuf encode/decode for the rubix envelopes (no protoc needed)
 src/ca.c        CA enrolment over HTTPS: register, key, CSR, sign
+src/mdns.c      finding boards: mDNS for the name, TCP sweep for the address
 src/util.c      hashing, base64, certificate CN
 proto/          envelope.proto, for reference
 scripts/        bootstrap.sh
