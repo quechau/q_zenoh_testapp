@@ -1,0 +1,5 @@
+# Dependencies are fetched and built by scripts/bootstrap.sh, never committed.
+third_party/mbedtls/
+third_party/zenoh-pico/
+third_party/prefix/
+build/

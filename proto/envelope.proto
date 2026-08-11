@@ -1,0 +1,102 @@
+// envelope.proto
+//
+// Common request/response envelope for every embedded service. Lives
+// at the proto/ root because it is independent of any specific service
+// and is shared by *every* service-payload schema in services/.
+//
+// See `Embedded-Devices/docs/espidf-port/phase-03-board-info-proto-nanopb-contract.md`
+// for the full specification.
+
+syntax = "proto3";
+
+package rubix.embedded.v1;
+
+// ---------------------------------------------------------------------------
+// Envelope — common to every service request and reply.
+// ---------------------------------------------------------------------------
+
+message RequestEnvelope {
+  // Wire version. Hard-fails if the receiver doesn't recognise it.
+  uint32 wire_version       = 1;   // current = 1
+
+  // Reverse-DNS service id, e.g. "system.boardinfo".
+  string service_id         = 2;
+
+  // What the caller wants to do.
+  ServiceOperation op       = 3;
+
+  // Client-chosen sequence number; echoed in the reply for correlation.
+  uint32 seq                = 4;
+
+  // Optional client identity. Transports may override or ignore.
+  string client_id          = 5;
+
+  // Monotonic ms deadline; 0 ⇒ server default.
+  uint64 deadline_ms        = 6;
+
+  // Encoding of the payload bytes (forward-compat with future codecs).
+  PayloadEncoding encoding  = 7;
+
+  // Op-specific payload, opaque to the dispatcher.
+  bytes  payload            = 8;
+}
+
+message ResponseEnvelope {
+  uint32 wire_version       = 1;   // mirrors request
+  string service_id         = 2;   // mirrors request
+  ServiceOperation op       = 3;   // mirrors request
+  uint32 seq                = 4;   // mirrors request
+  PayloadEncoding encoding  = 5;
+  bytes  payload            = 6;   // empty when error.code != ERROR_OK
+  ErrorInfo error           = 7;
+  // True for server-pushed notifications emitted after a successful
+  // OP_SUBSCRIBE registration. False for direct request/reply.
+  bool   is_notification    = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+message ErrorInfo {
+  ErrorCode code   = 1;            // ERROR_OK on success
+  string    message = 2;           // human-readable; never branched on
+  string    detail  = 3;           // optional structured detail
+}
+
+enum ErrorCode {
+  ERROR_OK          = 0;
+  ERROR_UNSUPPORTED = 1;
+  ERROR_BAD_REQUEST = 2;
+  ERROR_STATE       = 3;
+  ERROR_PERMISSION  = 4;
+  ERROR_TIMEOUT     = 5;
+  ERROR_HARDWARE    = 6;
+  ERROR_INTERNAL    = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Operation surface (mirror of the firmware IService op enum).
+// ---------------------------------------------------------------------------
+
+enum ServiceOperation {
+  OP_UNKNOWN   = 0;
+  OP_READ      = 1;
+  OP_WRITE     = 2;
+  OP_VALIDATE  = 3;
+  OP_SUBSCRIBE = 4;
+  OP_EXECUTE   = 5;
+  OP_DISCOVER  = 6;
+  OP_PING      = 7;
+  OP_RESET     = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Payload encoding (forward-compat; today: PROTO + JSON_DEBUG).
+// ---------------------------------------------------------------------------
+
+enum PayloadEncoding {
+  ENC_UNKNOWN    = 0;
+  ENC_PROTO      = 1;
+  ENC_JSON_DEBUG = 2;
+}

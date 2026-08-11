@@ -1,0 +1,399 @@
+/** session.c — the zenoh side: open a peer session over mTLS, discover boards, pub/sub,
+ *  log in with the S1 proof, and run a protobuf request/reply.
+ */
+#include "qz.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+/* ------------------------------------------------------------------ session */
+
+int qz_session_open(qz_ctx_t *ctx)
+{
+    if (ctx->session_open) qz_session_close(ctx);
+
+    char ca[QZ_MAX_PATH], cert[QZ_MAX_PATH], key[QZ_MAX_PATH];
+    snprintf(ca,   sizeof(ca),   "%s/ca.pem",        ctx->certs_dir);
+    snprintf(cert, sizeof(cert), "%s/device.pem",    ctx->certs_dir);
+    snprintf(key,  sizeof(key),  "%s/device-key.pem", ctx->certs_dir);
+
+    /* ADR-016: the board compares the envelope client_id against the CN of the certificate on
+     * this session and refuses everything on a mismatch. Say so up front rather than letting
+     * every later command fail with a confusing PERMISSION denied. */
+    char cn[QZ_MAX_ID] = {0};
+    if (qz_cert_cn(cert, cn, sizeof(cn)) == 0) {
+        if (ctx->client_id[0] == '\0') {
+            snprintf(ctx->client_id, sizeof(ctx->client_id), "%s", cn);
+            qz_log("ID", "client_id taken from the certificate CN: %s", ctx->client_id);
+        } else if (strcmp(cn, ctx->client_id) != 0) {
+            qz_log("WARN", "client_id '%s' != certificate CN '%s' — the board will answer "
+                           "PERMISSION denied to every request (ADR-016)",
+                   ctx->client_id, cn);
+        }
+    } else {
+        qz_log("WARN", "could not read the CN from %s", cert);
+    }
+
+    z_owned_config_t cfg;
+    z_config_default(&cfg);
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_MODE_KEY, "peer");
+
+    /* Order matters. zenoh-pico's config map has 16 buckets and hashes the raw key;
+     * Z_CONFIG_CONNECT_KEY (0x41) and Z_CONFIG_TLS_ENABLE_MTLS_KEY (0x51) both land in
+     * bucket 1, and _z_config_get_all walks a bucket without re-checking the key. Insert the
+     * CONNECT locator FIRST or the literal "true" from enable_mtls is handed to the locator
+     * parser as if it were an endpoint. */
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_CONNECT_KEY, ctx->endpoint);
+    if (ctx->listen[0] != '\0')
+        zp_config_insert(z_loan_mut(cfg), Z_CONFIG_LISTEN_KEY, ctx->listen);
+
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_ROOT_CA_CERTIFICATE_KEY, ca);
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_CONNECT_CERTIFICATE_KEY, cert);
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_CONNECT_PRIVATE_KEY_KEY, key);
+    if (ctx->listen[0] != '\0') {
+        zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_LISTEN_CERTIFICATE_KEY, cert);
+        zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_LISTEN_PRIVATE_KEY_KEY, key);
+    }
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_ENABLE_MTLS_KEY, "true");
+    /* The board's certificate pins the address it was enrolled at, so verification of the
+     * name fails whenever it is reached by any other address. Off by default here, on with
+     * --verify-name when you do want to check it. */
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_TLS_VERIFY_NAME_ON_CONNECT_KEY,
+                     ctx->verify_name ? "true" : "false");
+
+    uint64_t t0 = qz_now_ms();
+    if (z_open(&ctx->session, z_move(cfg), NULL) != Z_OK) {
+        qz_log("FATAL", "z_open failed for %s — is the board listening, and does its CA match "
+                        "%s?", ctx->endpoint, ca);
+        return -1;
+    }
+    if (zp_start_read_task(z_loan_mut(ctx->session), NULL) != Z_OK ||
+        zp_start_lease_task(z_loan_mut(ctx->session), NULL) != Z_OK) {
+        qz_log("FATAL", "could not start the zenoh read/lease tasks");
+        z_drop(z_move(ctx->session));
+        return -1;
+    }
+    ctx->session_open = true;
+    ctx->logged_in = false;
+    qz_log("OPEN", "session up in %llu ms  endpoint=%s  client_id=%s",
+           (unsigned long long)(qz_now_ms() - t0), ctx->endpoint, ctx->client_id);
+    return 0;
+}
+
+void qz_session_close(qz_ctx_t *ctx)
+{
+    if (!ctx->session_open) return;
+    z_drop(z_move(ctx->session));
+    ctx->session_open = false;
+    ctx->logged_in = false;
+    qz_log("CLOSE", "session closed");
+}
+
+/* ---------------------------------------------------------------- discovery */
+
+static void on_announce(z_loaned_sample_t *sample, void *arg)
+{
+    qz_ctx_t *ctx = (qz_ctx_t *)arg;
+
+    z_view_string_t ks;
+    if (z_keyexpr_as_view_string(z_sample_keyexpr(sample), &ks) != Z_OK) return;
+    char key[QZ_MAX_KEY];
+    size_t kl = z_string_len(z_loan(ks));
+    if (kl >= sizeof(key)) kl = sizeof(key) - 1;
+    memcpy(key, z_string_data(z_loan(ks)), kl);
+    key[kl] = '\0';
+
+    /* rubix/peers/<peer-id>/announce */
+    const char *p = strstr(key, "rubix/peers/");
+    if (p == NULL) return;
+    p += strlen("rubix/peers/");
+    const char *slash = strchr(p, '/');
+    if (slash == NULL) return;
+    char id[QZ_MAX_ID];
+    size_t idl = (size_t)(slash - p);
+    if (idl >= sizeof(id)) return;
+    memcpy(id, p, idl);
+    id[idl] = '\0';
+
+    /* Payload is "<seq> <nonce-hex>" — the nonce is what `login` needs, and it changes on
+     * every board reboot, so it is re-read here rather than cached across runs. */
+    char nonce[QZ_NONCE_HEX] = {0};
+    z_owned_slice_t slice;
+    if (z_bytes_to_slice(z_sample_payload(sample), &slice) == Z_OK) {
+        const uint8_t *d = z_slice_data(z_loan(slice));
+        size_t n = z_slice_len(z_loan(slice));
+        char tmp[128];
+        if (n >= sizeof(tmp)) n = sizeof(tmp) - 1;
+        memcpy(tmp, d, n);
+        tmp[n] = '\0';
+        const char *sp = strchr(tmp, ' ');
+        if (sp != NULL) snprintf(nonce, sizeof(nonce), "%s", sp + 1);
+        z_drop(z_move(slice));
+    }
+
+    for (size_t i = 0; i < ctx->board_count; i++) {
+        if (strcmp(ctx->boards[i].peer_id, id) == 0) {
+            ctx->boards[i].announces++;
+            ctx->boards[i].last_seen_ms = qz_now_ms();
+            if (nonce[0] != '\0') snprintf(ctx->boards[i].nonce, QZ_NONCE_HEX, "%s", nonce);
+            return;
+        }
+    }
+    if (ctx->board_count < QZ_MAX_BOARDS) {
+        qz_board_t *b = &ctx->boards[ctx->board_count++];
+        snprintf(b->peer_id, sizeof(b->peer_id), "%s", id);
+        snprintf(b->nonce, sizeof(b->nonce), "%s", nonce);
+        b->announces = 1;
+        b->last_seen_ms = qz_now_ms();
+        qz_log("FOUND", "%s  (nonce %s)", b->peer_id, b->nonce[0] ? b->nonce : "not seen yet");
+    }
+}
+
+int qz_discover(qz_ctx_t *ctx, unsigned seconds)
+{
+    if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
+
+    ctx->board_count = 0;
+    z_owned_closure_sample_t closure;
+    z_closure_sample(&closure, on_announce, NULL, ctx);
+    z_view_keyexpr_t ke;
+    z_view_keyexpr_from_str(&ke, "rubix/peers/*/announce");
+    z_owned_subscriber_t sub;
+    if (z_declare_subscriber(z_loan(ctx->session), &sub, z_loan(ke), z_move(closure), NULL)
+        != Z_OK) {
+        qz_log("ERR", "could not subscribe to the announce beacon");
+        return -1;
+    }
+    qz_log("SCAN", "listening %us for rubix/peers/*/announce", seconds);
+    sleep(seconds);
+    z_drop(z_move(sub));
+
+    if (ctx->board_count == 0) {
+        qz_log("SCAN", "no board announced. The session is up, so either nothing is "
+                       "publishing or this peer is not reaching it.");
+        return 0;
+    }
+    printf("\n  %-28s %9s  %s\n", "PEER ID", "ANNOUNCES", "NONCE");
+    for (size_t i = 0; i < ctx->board_count; i++)
+        printf("  %-28s %9u  %s\n", ctx->boards[i].peer_id, ctx->boards[i].announces,
+               ctx->boards[i].nonce);
+    printf("\n");
+    if (ctx->board[0] == '\0' && ctx->board_count == 1) {
+        snprintf(ctx->board, sizeof(ctx->board), "%s", ctx->boards[0].peer_id);
+        qz_log("SELECT", "only one board seen — commands will address %s", ctx->board);
+    }
+    return (int)ctx->board_count;
+}
+
+/* ------------------------------------------------------------------ pub/sub */
+
+typedef struct { unsigned count; bool dump; } sub_state_t;
+
+static void on_any(z_loaned_sample_t *sample, void *arg)
+{
+    sub_state_t *st = (sub_state_t *)arg;
+    st->count++;
+
+    z_view_string_t ks;
+    if (z_keyexpr_as_view_string(z_sample_keyexpr(sample), &ks) != Z_OK) return;
+    z_owned_slice_t slice;
+    size_t n = 0;
+    const uint8_t *d = NULL;
+    if (z_bytes_to_slice(z_sample_payload(sample), &slice) == Z_OK) {
+        d = z_slice_data(z_loan(slice));
+        n = z_slice_len(z_loan(slice));
+    }
+    qz_log("RECV", "[%u] %.*s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
+           z_string_data(z_loan(ks)), n);
+    if (st->dump && d != NULL && n > 0) qz_envelope_dump(d, n, true, "              ");
+    if (d != NULL) z_drop(z_move(slice));
+}
+
+int qz_subscribe(qz_ctx_t *ctx, const char *keyexpr, unsigned seconds)
+{
+    if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
+    sub_state_t st = {0, true};
+    z_owned_closure_sample_t closure;
+    z_closure_sample(&closure, on_any, NULL, &st);
+    z_view_keyexpr_t ke;
+    if (z_view_keyexpr_from_str(&ke, keyexpr) != Z_OK) {
+        qz_log("ERR", "bad key expression: %s", keyexpr);
+        return -1;
+    }
+    z_owned_subscriber_t sub;
+    if (z_declare_subscriber(z_loan(ctx->session), &sub, z_loan(ke), z_move(closure), NULL)
+        != Z_OK) {
+        qz_log("ERR", "declare_subscriber failed");
+        return -1;
+    }
+    qz_log("SUB", "%s for %us", keyexpr, seconds);
+    sleep(seconds);
+    z_drop(z_move(sub));
+    qz_log("SUB", "%u sample(s)", st.count);
+    return (int)st.count;
+}
+
+int qz_publish(qz_ctx_t *ctx, const char *keyexpr, const char *payload)
+{
+    if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
+    z_view_keyexpr_t ke;
+    if (z_view_keyexpr_from_str(&ke, keyexpr) != Z_OK) {
+        qz_log("ERR", "bad key expression: %s", keyexpr);
+        return -1;
+    }
+    z_owned_bytes_t bytes;
+    z_bytes_copy_from_buf(&bytes, (const uint8_t *)payload, strlen(payload));
+    z_put_options_t opts;
+    z_put_options_default(&opts);
+    opts.congestion_control = Z_CONGESTION_CONTROL_BLOCK;
+    if (z_put(z_loan(ctx->session), z_loan(ke), z_move(bytes), &opts) != Z_OK) {
+        qz_log("ERR", "put failed");
+        return -1;
+    }
+    qz_log("PUB", "%s  %zuB", keyexpr, strlen(payload));
+    return 0;
+}
+
+/* ------------------------------------------------------------ request/reply */
+
+typedef struct {
+    uint32_t seq;
+    bool     got;
+    uint64_t sent_ms;
+    uint8_t  reply[2048];
+    size_t   reply_len;
+} rpc_state_t;
+
+static void on_ack(z_loaned_sample_t *sample, void *arg)
+{
+    rpc_state_t *st = (rpc_state_t *)arg;
+    z_owned_slice_t slice;
+    if (z_bytes_to_slice(z_sample_payload(sample), &slice) != Z_OK) return;
+    const uint8_t *d = z_slice_data(z_loan(slice));
+    size_t n = z_slice_len(z_loan(slice));
+
+    /* Only accept an ack that echoes OUR seq. The ack key already carries our client_id, but
+     * a stale reply to an earlier request would otherwise be reported as this one's. */
+    uint64_t seq = 0;
+    if (qz_field_varint(d, n, 4, &seq) && (uint32_t)seq == st->seq) {
+        if (n > sizeof(st->reply)) n = sizeof(st->reply);
+        memcpy(st->reply, d, n);
+        st->reply_len = n;
+        st->got = true;
+    }
+    z_drop(z_move(slice));
+}
+
+int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
+               const uint8_t *payload, size_t payload_len, unsigned timeout_s)
+{
+    if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
+    if (ctx->board[0] == '\0') { qz_log("ERR", "no board selected — run `discover` or `use <id>`"); return -1; }
+
+    rpc_state_t st = {0};
+    st.seq = (uint32_t)(qz_now_ms() & 0xFFFF);
+
+    char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
+    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s",
+             ctx->board, service, ctx->client_id);
+    snprintf(req_key, sizeof(req_key), "rubix/%s/svc/%s/req", ctx->board, service);
+
+    /* Subscribe BEFORE publishing: the board answers in tens of milliseconds and a late
+     * subscriber simply misses it. */
+    z_owned_closure_sample_t closure;
+    z_closure_sample(&closure, on_ack, NULL, &st);
+    z_view_keyexpr_t ack_ke;
+    z_view_keyexpr_from_str(&ack_ke, ack_key);
+    z_owned_subscriber_t sub;
+    if (z_declare_subscriber(z_loan(ctx->session), &sub, z_loan(ack_ke), z_move(closure), NULL)
+        != Z_OK) {
+        qz_log("ERR", "could not subscribe to %s", ack_key);
+        return -1;
+    }
+    usleep(300 * 1000);
+
+    uint8_t body[2048];
+    int blen = qz_req_encode(body, sizeof(body), service, op, st.seq, ctx->client_id,
+                             payload, payload_len);
+    if (blen < 0) { z_drop(z_move(sub)); qz_log("ERR", "envelope too large"); return -1; }
+
+    qz_log("REQ", "%s  %dB  seq=%u", req_key, blen, st.seq);
+    qz_envelope_dump(body, (size_t)blen, false, "              ");
+
+    z_view_keyexpr_t req_ke;
+    z_view_keyexpr_from_str(&req_ke, req_key);
+    z_owned_bytes_t bytes;
+    z_bytes_copy_from_buf(&bytes, body, (size_t)blen);
+    z_put_options_t opts;
+    z_put_options_default(&opts);
+    opts.congestion_control = Z_CONGESTION_CONTROL_BLOCK;
+    st.sent_ms = qz_now_ms();
+    if (z_put(z_loan(ctx->session), z_loan(req_ke), z_move(bytes), &opts) != Z_OK) {
+        z_drop(z_move(sub));
+        qz_log("ERR", "publishing the request failed");
+        return -1;
+    }
+
+    for (unsigned i = 0; i < timeout_s * 20 && !st.got; i++) usleep(50 * 1000);
+    z_drop(z_move(sub));
+
+    if (!st.got) {
+        /* Worth knowing: the board drops requests silently when its dispatch queue is full
+         * (zero-timeout xQueueSend into a depth-8 queue), so a timeout does not necessarily
+         * mean the request never arrived. */
+        qz_log("REQ", "no ack within %us on %s", timeout_s, ack_key);
+        return -1;
+    }
+    qz_log("ACK", "seq=%u  %zuB  round trip %llu ms", st.seq, st.reply_len,
+           (unsigned long long)(qz_now_ms() - st.sent_ms));
+    qz_envelope_dump(st.reply, st.reply_len, true, "              ");
+
+    uint64_t err = 0;
+    if (qz_field_varint(st.reply, st.reply_len, 7, &err) && err != 0)
+        qz_log("ACK", "error code %llu", (unsigned long long)err);
+    return 0;
+}
+
+/* --------------------------------------------------------------------- login */
+
+int qz_login(qz_ctx_t *ctx, const char *password)
+{
+    if (ctx->board[0] == '\0') { qz_log("ERR", "no board selected"); return -1; }
+
+    const char *nonce = NULL;
+    for (size_t i = 0; i < ctx->board_count; i++)
+        if (strcmp(ctx->boards[i].peer_id, ctx->board) == 0) nonce = ctx->boards[i].nonce;
+    if (nonce == NULL || nonce[0] == '\0') {
+        qz_log("ERR", "no nonce for %s — run `discover` first; the nonce is carried in the "
+                      "announce beacon and changes on every board reboot", ctx->board);
+        return -1;
+    }
+
+    /* proof = sha256( nonce_hex ":" client_id ":" hex(sha256(password)) )
+     * The password itself never crosses the wire. Verified against ACB-M's
+     * b_ZENOH_Verify_Proof, which hashes exactly this string. */
+    uint8_t pw[32];
+    char pwhex[65];
+    qz_sha256_str(password, pw);
+    qz_hex(pw, sizeof(pw), pwhex);
+
+    char msg[QZ_NONCE_HEX + QZ_MAX_ID + 80];
+    snprintf(msg, sizeof(msg), "%s:%s:%s", nonce, ctx->client_id, pwhex);
+    uint8_t proof[32];
+    qz_sha256_str(msg, proof);
+
+    char proofhex[65];
+    qz_hex(proof, sizeof(proof), proofhex);
+    qz_log("AUTH", "nonce=%s client=%s", nonce, ctx->client_id);
+    qz_log("AUTH", "proof=%s", proofhex);
+
+    if (qz_request(ctx, "system.auth", QZ_OP_EXECUTE, proof, sizeof(proof), 10) != 0) {
+        qz_log("AUTH", "no verdict from the board");
+        return -1;
+    }
+    ctx->logged_in = true;
+    qz_log("AUTH", "sent; a zero error code above means unlocked");
+    return 0;
+}
