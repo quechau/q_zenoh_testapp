@@ -290,6 +290,10 @@ qz_payload_kind_t qz_payload_type(const char *service, uint64_t op, bool respons
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     QZ_T_VARINT, QZ_T_SVARINT, QZ_T_BOOL, QZ_T_DOUBLE, QZ_T_FLOAT,
     QZ_T_FIXED32, QZ_T_FIXED64, QZ_T_STRING, QZ_T_BYTES, QZ_T_MSG, QZ_T_ENUM
@@ -322,6 +326,10 @@ const qz_pmsg_t  *qz_msg_find(const char *name);
 const char       *qz_enum_label(int ref, uint64_t value);
 qz_payload_kind_t qz_payload_type(const char *service, uint64_t op, bool response,
                                   const qz_pmsg_t **out);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* QZ_PROTO_TABLES_H */
 '''))
