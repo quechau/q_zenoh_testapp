@@ -31,7 +31,7 @@ ENDPOINT=""
 PASSWORD="${QZ_PASSWORD:-acbm-fabric-2026}"
 PROFILE=""
 CLEAN=0
-MAC=11
+MAC=4
 SUB_SECS=20
 # Empty until a profile picks its own, so two profiles cannot overwrite each other's device.
 # A device id is the key of the upsert: reusing it silently repoints every point that
@@ -120,19 +120,25 @@ them before each transaction, so both can sit on one bus, time-multiplexed. Note
 the HVAC board support both answer to unit 1 — they cannot be wired at the same time."
     ;;
 
-  # --- BACnet MS/TP IO card ---------------------------------------------------------------
-  # ACB-M/docs/BACnet-Module — the MAC is set by DIP switch on the card; pass --mac.
+  # --- BACnet MS/TP: the ZCIO on the bench ------------------------------------------------
+  # ACB-M/docs/BACnet-Module/8-testcases.md §TC-ZBN-*: ZCIO at MS/TP MAC 4 on RS485-2, with a
+  # physical loopback wire BO:6 -> BI:4. That pair is what makes the test self-checking: write
+  # the output, read the input, and the wire is the only thing that could have carried it.
   bacnet:*)
     : "${DEVICE_ID:=1}"
     DEVICE="device_id=$DEVICE_ID mac_addr=$MAC enabled=true"
     POINTS=(
-      "point_id=301 device_ref=$DEVICE_ID obj_type=OBJ_AV obj_instance=1 scale=1 writable=true  poll_class=POLL_NORMAL name=bac-av-1"
-      "point_id=302 device_ref=$DEVICE_ID obj_type=OBJ_AI obj_instance=1 scale=1 writable=false poll_class=POLL_NORMAL name=bac-ai-1"
-      "point_id=303 device_ref=$DEVICE_ID obj_type=OBJ_BV obj_instance=1 scale=1 writable=true  poll_class=POLL_NORMAL name=bac-bv-1"
+      "point_id=306 device_ref=$DEVICE_ID obj_type=OBJ_BO obj_instance=6 scale=1 writable=true  poll_class=POLL_NORMAL name=relay6"
+      "point_id=304 device_ref=$DEVICE_ID obj_type=OBJ_BI obj_instance=4 scale=1 writable=false poll_class=POLL_FAST   name=input4"
+      "point_id=305 device_ref=$DEVICE_ID obj_type=OBJ_AV obj_instance=5 scale=1 writable=true  poll_class=POLL_NORMAL name=setpoint-zone1"
     )
-    WRITE="point_id=301 value=50"
-    NOTE="There is no discovery — the master never sends Who-Is and synthesises an address-cache
+    WRITE="point_id=306 value=1"
+    NOTE="relay6 (BO:6) is wired to input4 (BI:4), so writing relay6=1 must show up on input4
+within a few seconds. If it does not, the wire or the MAC is wrong — not the transport.
+There is no discovery — the master never sends Who-Is and synthesises an address-cache
 entry from mac_addr alone, so a wrong DIP setting is a permanently faulted point, not an error.
+The board needs an RS485 port in MS/TP master role (param 0x0241/0x0242 = 3) or the whole
+delta comes back REJ_IFACE_ROLE rather than the points quietly faulting.
 WRITES ARE PERMANENT: WriteProperty goes out at priority 1 and is never relinquished, so the
 first value written seizes that slot on the target until it reboots. Writes to AI and BI are
 rejected whatever `writable` says, because the master decides from the object type."

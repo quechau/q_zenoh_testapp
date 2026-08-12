@@ -707,6 +707,28 @@ Note each iteration is its own session. If you are watching `seq_no`, that matte
   [  6.079s] AUTH     UNLOCKED as ce-acf23c0d8637
 ```
 
+### Turning something off, and checking it went off
+
+```bash
+printf "login $PW\npoints modbus write point_id=204 value=0\nquit\n" \
+  | timeout 90 ./build/q_zenoh_testapp --endpoint "$EP" 2>&1 | grep -E "accepted|applied_value"
+sleep 10
+printf "login $PW\npoints modbus read 204 203\nquit\n" \
+  | timeout 90 ./build/q_zenoh_testapp --endpoint "$EP" 2>&1 \
+  | grep -E 'point_id|"value"|quality' | tr -d ' ' | paste -sd' ' -
+```
+
+`accepted: true` is the device cache accepting the write, **not** the bus confirming it. The
+read-back is the confirmation, and the two are not the same event — measured on this bench,
+turning the AC off read back as off, while turning it back on was accepted and did not take.
+When a write is accepted and does not take, the board's console is where the answer is:
+
+```
+E Srvc_Modbus_Master: Address of holding registers returned from slave 1 is invalid
+```
+
+That line is invisible over zenoh — see §10, where the point kept reporting `Q_GOOD`.
+
 ### The whole service, end to end
 
 ```bash
