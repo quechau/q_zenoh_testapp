@@ -229,7 +229,9 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         }
         if (strcmp(argv[2], "sub") == 0) {
             char key[192];
-            snprintf(key, sizeof key, "rubix/%s/svc/%s/notify", ctx->board, service);
+            /* `/**` matches zero or more chunks, so this catches a notify key stamped with
+             * the board's device time as well as a bare one. */
+            snprintf(key, sizeof key, "rubix/%s/svc/%s/notify/**", ctx->board, service);
             return qz_subscribe(ctx, key, argc > 3 ? (unsigned)atoi(argv[3]) : 30) >= 0 ? 0 : -1;
         }
         qz_log("ERR", "points <proto> read|write|sub");
