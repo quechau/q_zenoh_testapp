@@ -350,15 +350,12 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
      * mystery. The seq and service_id checks in on_ack stay regardless: the key is an
      * optimisation, the envelope is the contract. */
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
-    /* The direction chunk is a wildcard so this matches a device publishing `res` and one still
-     * publishing `ack`. It cannot catch anything else: the chunks after it are our own client
-     * id and this call's seq, which no other key on this service carries there. */
-    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/*/%s/%u/**",
-             ctx->board, service, ctx->client_id, st.seq);
-    /* The transaction id rides the request key too, so both directions name the exchange in
-     * the topic and a log line is readable without decoding the envelope. The board subscribes
-     * `.../req/**`, which matches this and the bare key alike. */
-    snprintf(req_key, sizeof(req_key), "rubix/%s/svc/%s/req/%u", ctx->board, service, st.seq);
+    /* The verb and the transaction id lead, so a reply key is unique per call and this
+     * subscription is exact — zenoh delivers this call's reply and nothing else. */
+    snprintf(ack_key, sizeof(ack_key), "res/%u/%s/%s/svc/%s",
+             st.seq, ctx->client_id, ctx->board, service);
+    /* Same shape on the way out. The board subscribes on req, one wildcard where the seq goes. */
+    snprintf(req_key, sizeof(req_key), "req/%u/%s/svc/%s", st.seq, ctx->board, service);
 
     /* Subscribe BEFORE publishing: the board answers in tens of milliseconds and a late
      * subscriber simply misses it. */

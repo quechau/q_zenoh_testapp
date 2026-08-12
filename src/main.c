@@ -231,7 +231,8 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
             char key[192];
             /* `/**` matches zero or more chunks, so this catches a notify key stamped with
              * the board's device time as well as a bare one. */
-            snprintf(key, sizeof key, "rubix/%s/svc/%s/notify/**", ctx->board, service);
+            /* cov/<device-ms>/<board>/svc/<service> — the timestamp chunk is wildcarded. */
+            snprintf(key, sizeof key, "cov/*/%s/svc/%s", ctx->board, service);
             return qz_subscribe(ctx, key, argc > 3 ? (unsigned)atoi(argv[3]) : 30) >= 0 ? 0 : -1;
         }
         qz_log("ERR", "points <proto> read|write|sub");
