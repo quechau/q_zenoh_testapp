@@ -439,10 +439,11 @@ relinquished — see §4.
 
 ---
 
-## 10. `seq_no` does not mean "the value changed"
+## 10. Two things measured on Modbus, one of them a defect
 
-`PointValue.seq_no` is documented as a per-point monotonic counter and the authority for
-last-writer-wins, and the board does bump it only inside a COV gate:
+### `seq_no` does not mean "the value changed"
+
+The board bumps `PointValue.seq_no` inside a COV gate, so it looks like proof that a value moved:
 
 ```c
 const bool b_changed = pstru_point->b_dirty_first || (b_ok != pstru_point->b_last_valid) ||
@@ -452,39 +453,66 @@ if (!b_changed) continue;
 pstru_point->u64_seq_no++;
 ```
 
-So it looks like proof that a value moved. It is not, because of the first term. When a notify
-publish fails the board calls `v_ZMB_Mark_All_Dirty()` to re-arm — deliberately, so values are
-not silently lost — and that sets `b_dirty_first` on **every** point. The next tick therefore
-counts every point as changed and bumps every `seq_no`, with nothing on the field bus having
-moved at all.
+It is not, because of the first term. When a notify publish fails the board calls
+`v_ZMB_Mark_All_Dirty()` to re-arm — deliberately, so values are not lost — and that sets
+`b_dirty_first` on **every** point. Measured: `seq_no` climbed 3 → 7 across six reads in six
+sessions with the value fixed at 53521; four reads inside **one** session left it at 10. It
+tracks sessions, not values, because a session ending is what makes the next publish fail.
 
-Measured: `zcd-alive` is the ZC-Damper's constant `0xD111`. Across six reads in six sessions its
-`seq_no` climbed 3 → 7 while the value never left 53521. Four reads inside **one** session left
-it at 10. It tracks sessions, not values, because a session ending is what makes the next publish
-fail.
+Use `seq_no` for last-writer-wins ordering, which is what the contract defines it for. Do not
+read it as a change indicator.
 
-**For a consumer this means:** use `seq_no` for last-writer-wins ordering, which is what the
-contract defines it for. Do not use it as a change indicator, and do not derive a rate of change
-from it. A climbing `seq_no` on a value that cannot change is expected here, not a fault.
+### CONFIRMED: a failed Modbus read is published as `Q_GOOD` with zero
 
-### An observation that did not survive re-testing
+Quality does not come from whether *this point's* read succeeded. It comes from whether the
+*slave* is considered connected:
 
-An earlier revision of this section reported a defect: several points reading `Q_GOOD` with an
-absent value (zero) on registers that were known-good, which looked like a mis-paired Modbus
-response being published as good rather than dropped. That claim rested on the `seq_no`
-reasoning above, and the reasoning was wrong.
+```c
+/* app_modbus/master/point_handler.cpp */
+*pflt_value = x_point->flt_value_get;
+return (x_point->b_enabled && x_point->b_connected) ? MBCTL_OK : MBCTL_ERR_COMM_FAILED;
+```
 
-The zero readings were real and are recorded here rather than deleted — they happened while the
-device definition was being re-upserted repeatedly with different line rates (19200/PAR_ODD,
-then 9600/PAR_EVEN, then 38400/PAR_NONE), and changing a device's line settings invalidates
-every point provisioned under it. With the device left alone at the ZC-Damper's actual
-38400-8-N-1, none of it reproduces: a freshly provisioned point reads 53521 immediately, four
-points on one device all read plausible values, and forty seconds of idle produce no phantom COV
-events on the console.
+`flt_value_get` is whatever was last stored — zero if nothing ever was. So a point reports
+`Q_GOOD` with a value it has never successfully read, and a consumer cannot tell that zero from
+a real one.
 
-So: not a confirmed defect, and not evidence of one. What it does illustrate is that a wrong
-line rate does not necessarily present as `Q_FAULT` — worth knowing when a point looks healthy
-and reads nonsense.
+Measured on hardware, in a single capture window:
+
+```
+console:   E Srvc_Modbus_Master: Address of holding registers returned from slave 1 is invalid   (×24)
+over zenoh: point_id 204 quality Q_GOOD   (no value → 0)
+            point_id 202 quality Q_GOOD   (no value → 0)
+            point_id 205 quality Q_GOOD   (no value → 0)
+            point_id 203 quality Q_GOOD   value 1
+```
+
+The master is rejecting the slave's responses twenty-four times while three of the four points
+report themselves good. The same shape appears before a point's first successful poll: a freshly
+provisioned point reads `Q_GOOD` with no value for as long as the register is unreadable.
+
+**BACnet, on the same board and the same contract, gets this right.** Three points provisioned
+against a MAC with nothing behind it read `Q_FAULT`, immediately and consistently. Two protocols,
+one bus abstraction, and only one of them tells a consumer to disregard the number.
+
+Why it matters more than a fault would: `Q_FAULT` tells a control loop to hold its last good
+value or fail safe. `Q_GOOD` with a zero invites it to act — a damper reporting 0 % and healthy
+when the register was never read is indistinguishable from a damper genuinely closed.
+
+The fix belongs in the modbus master, not in the contract: quality must reflect the last
+transaction for that point, not the reachability of the slave that owns it.
+
+### The ZC-Damper register map is not hardware-verified
+
+`ACB-M/docs/Modbus-Module/zc-damper-control-test` says so itself — its values are derived from
+source and were never run against the device. Measured here: `address=999` (holding, the alive
+register) reads `53521` cleanly with no master errors, exactly as documented. `address=42000`
+(damper 0 target) makes the master log `Address of holding registers returned from slave 11 is
+invalid` on every poll, with a single point provisioned and nothing else on the bus.
+
+So a write to it is `accepted` — that is the device cache accepting it, which the contract is
+explicit about — and nothing reads back. Do not treat the damper half of that document as
+verified until someone runs it.
 
 ## 11. Telling concurrent calls apart
 

@@ -205,8 +205,14 @@ static void on_any(z_loaned_sample_t *sample, void *arg)
         d = z_slice_data(z_loan(slice));
         n = z_slice_len(z_loan(slice));
     }
-    qz_log("RECV", "[%u] %.*s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
-           z_string_data(z_loan(ks)), n);
+    /* A sample on a subscription is unsolicited by definition, so it gets the cov_ tag and
+     * the envelope's seq — which for a notification is not a transaction id and pairs with
+     * nothing. Tagging it says so, instead of printing a number that invites the reader to
+     * look for a request that never existed. */
+    uint64_t nseq = 0;
+    if (d != NULL && n > 0) (void)qz_field_varint(d, n, 4, &nseq);
+    qz_log("RECV", "[%u] %.*s  cov_%u  %zuB", st->count, (int)z_string_len(z_loan(ks)),
+           z_string_data(z_loan(ks)), (unsigned)nseq, n);
     if (st->dump && d != NULL && n > 0) qz_packet_dump(d, n, true, "              ");
     if (d != NULL) z_drop(z_move(slice));
 }
@@ -331,7 +337,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
     snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s/%u/**",
              ctx->board, service, ctx->client_id, st.seq);
-    snprintf(req_key, sizeof(req_key), "rubix/%s/svc/%s/req", ctx->board, service);
+    /* The transaction id rides the request key too, so both directions name the exchange in
+     * the topic and a log line is readable without decoding the envelope. The board subscribes
+     * `.../req/**`, which matches this and the bare key alike. */
+    snprintf(req_key, sizeof(req_key), "rubix/%s/svc/%s/req/%u", ctx->board, service, st.seq);
 
     /* Subscribe BEFORE publishing: the board answers in tens of milliseconds and a late
      * subscriber simply misses it. */
@@ -352,7 +361,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                              payload, payload_len);
     if (blen < 0) { z_drop(z_move(sub)); qz_log("ERR", "envelope too large"); return -1; }
 
-    qz_log("REQ", "%s %s  seq=%u  %dB", service, qz_op_name(op), st.seq, blen);
+    /* tx_ going out, rx_ coming back, cov_ for a notification nobody asked for. The NUMBER is
+     * the same at both ends of one exchange — this tool's tx_41 is the board's rx_41 — so
+     * grepping the number finds both halves; only the prefix says which half. */
+    qz_log("REQ", "%s %s  tx_%u  %dB", service, qz_op_name(op), st.seq, blen);
     qz_packet_dump(body, (size_t)blen, false, "              ");
 
     z_view_keyexpr_t req_ke;
@@ -383,7 +395,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
     }
-    qz_log("ACK", "%s %s  seq=%u  %zuB  round trip %llu ms", service, qz_op_name(op),
+    qz_log("ACK", "%s %s  rx_%u  %zuB  round trip %llu ms", service, qz_op_name(op),
            st.seq, st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
     qz_packet_dump(st.reply, st.reply_len, true, "              ");
