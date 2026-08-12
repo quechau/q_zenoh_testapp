@@ -16,19 +16,40 @@ if(NOT EXISTS "${QZ_PREFIX}/lib/libzenohpico.so")
 endif()
 
 # The JSON renderer reads the contract schema from generated tables rather than inferring it.
-# Generated at configure time and never committed, so the tables cannot drift from proto/.
+# Generated at configure time and never committed, so the tables cannot drift from the protos.
+#
+# Which protos, though. `proto/` here is a COPY of the contract package, and a copy drifts:
+# contract 0.2.0 added ModbusConfig.config_hash, the board sent it, and this app printed the
+# whole snapshot without it — not as an error, just as a field it had never heard of. The
+# stale copy was invisible precisely because everything still worked.
+#
+# So prefer the contract package when a checkout is next to us, exactly as ce-edgelink already
+# does, and fall back to the local copy when it is not (this app is useful standalone). Which
+# one was used is printed, because "my new field is missing" and "you built against last
+# month's contract" are the same symptom.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(QZ_GEN "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${QZ_GEN}")
-file(GLOB QZ_PROTOS "${CMAKE_CURRENT_SOURCE_DIR}/proto/*.proto"
-                    "${CMAKE_CURRENT_SOURCE_DIR}/proto/services/*.proto")
+
+set(QZ_CONTRACT "${CMAKE_CURRENT_SOURCE_DIR}/../control-engine-docs/Contracts/proto-contracts/proto"
+    CACHE PATH "Contract proto source; falls back to the bundled copy when absent")
+if(EXISTS "${QZ_CONTRACT}/envelope.proto")
+  set(QZ_PROTO_DIR "${QZ_CONTRACT}")
+  message(STATUS "contract schema: ${QZ_CONTRACT} (authoritative)")
+else()
+  set(QZ_PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/proto")
+  message(WARNING "contract package not found at ${QZ_CONTRACT}; using the bundled copy in "
+                  "proto/, which may lag the contract")
+endif()
+
+file(GLOB QZ_PROTOS "${QZ_PROTO_DIR}/*.proto" "${QZ_PROTO_DIR}/services/*.proto")
 add_custom_command(
   OUTPUT "${QZ_GEN}/proto_tables.c" "${QZ_GEN}/proto_tables.h"
   COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen-proto-tables.py"
-          "${CMAKE_CURRENT_SOURCE_DIR}/proto"
+          "${QZ_PROTO_DIR}"
           "${QZ_GEN}/proto_tables.c" "${QZ_GEN}/proto_tables.h"
   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gen-proto-tables.py" ${QZ_PROTOS}
-  COMMENT "Generating protobuf tables from proto/"
+  COMMENT "Generating protobuf tables from ${QZ_PROTO_DIR}"
   VERBATIM
 )
 

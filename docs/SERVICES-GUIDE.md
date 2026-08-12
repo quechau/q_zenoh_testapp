@@ -506,16 +506,18 @@ when the register was never read is indistinguishable from a damper genuinely cl
 The fix belongs in the modbus master, not in the contract: quality must reflect the last
 transaction for that point, not the reachability of the slave that owns it.
 
-### Provisioning does not survive a reboot, and opening the console causes one
+### Provisioning survives a reboot now — opening the console still causes one
 
-There is no persistence code in `zenoh_modbus.c` — the devices and points a consumer provisions
-live in RAM. A board restart clears them, and the host re-syncs on connect, which is what the
-CE's `SYNC svc=modbus.config outcome=0` line right after `AUTH` actually is.
+**Fixed 2026-08-12 (ADR-024).** This section used to say the opposite, and the measurement below
+was taken when it was true. Devices and points are stored in NVS and reloaded at boot, before any
+host connects, so a restart no longer clears them and a reconnecting host no longer re-pushes a
+config the board already has. §15 covers the fingerprint that makes that check possible.
 
-That matters for testing because **opening the board's serial port reboots the ESP32-S3** (the
-open toggles DTR/RTS). So a capture script that attaches the console mid-test does not observe
-the run — it restarts the board and wipes everything provisioned so far, and the next read comes
-back with an empty payload that looks like "no points configured".
+What still holds: **opening the board's serial port reboots the ESP32-S3** (the open toggles
+DTR/RTS). The reset is no longer destructive to configuration, but it still drops the Control
+Engine's session, interrupts whatever bus transaction was in flight, and restarts the poll cycle
+— so a capture script that attaches the console mid-test still does not observe the run it
+meant to.
 
 Measured: a config read immediately after attaching the console returned no payload at all,
 with device 11 and its points provisioned less than a minute earlier.
@@ -936,10 +938,10 @@ printf "login $PW\ndevices\nquit\n" | ./build/q_zenoh_testapp --endpoint "$EP"
 each protocol in its own terms — a Modbus point by register, a BACnet point by object, a LoRa
 point by field. `w`/`ro` is whether you may write it.
 
-**The board is the only authority on this.** Its device and point configuration lives in RAM: a
-reboot clears it and the host re-syncs on connect, so what a board holds is not what you
-provisioned earlier — it is whatever the last sync put there. After any restart, including the
-one caused by opening the console, `devices` is how you find out what is actually there.
+**The board is the only authority on this.** What it holds is not what you provisioned earlier —
+it is whatever it actually accepted, which differs whenever an entry was rejected or a later sync
+replaced it. Since ADR-024 the board also keeps that across a restart, and each plane's line
+carries the fingerprint that lets you check it did (§15).
 
 Two devices with the same physical address — two `mac 4` entries, or two Modbus devices on the
 same `unit_id` — are accepted by the board and are usually a mistake: they double the traffic to
@@ -1098,8 +1100,9 @@ start clean, delete by id:
 } | ./build/q_zenoh_testapp --endpoint "$EP"
 ```
 
-A board restart also clears it, since the config lives in RAM — but then the host re-syncs, so
-that is not a way to keep a board empty.
+A board restart no longer clears it (ADR-024) — the board reloads what it had from NVS. Removing
+entries is now the only way to empty a board, which is the point: a controller that forgot its
+configuration every time the power blinked was never the behaviour anyone wanted.
 
 ### Watch values change
 
@@ -1192,13 +1195,19 @@ client's per-request subscriber setup, not the board being slow.
 
 ### Capturing the board's side without breaking the test
 
-**Opening the serial port resets the ESP32-S3** — the open toggles DTR/RTS — and the reset wipes
-the RAM-only device config. So a script that attaches the console mid-test does not observe the
-run: it restarts the board and throws away everything provisioned so far, and the next read comes
-back empty in a way that reads as "nothing configured".
+**Opening the serial port resets the ESP32-S3** — the open toggles DTR/RTS. Since ADR-024 the
+reset no longer wipes the device config: the board reloads it from NVS before any host connects,
+and `devices` after a mid-test console attach shows the same tree and the same fingerprint it
+showed before. Measured across a hard RTS reset with no host present:
 
-Open the console **first**, then provision, then drive. §12 has a capture that does it in that
-order.
+```
+cfgstore modbus: restored 116 bytes fp=292bb67d67b8fdb9
+modbus config restored: 2 devices, 2 points (all accepted)
+```
+
+Open the console **first** anyway. The reset still interrupts whatever transaction was in
+flight, still costs the Control Engine its session, and still restarts the poll cycle — it is
+just no longer destructive to configuration. §12 has a capture that does it in that order.
 
 If you need to know whether the board restarted without opening the console at all, read
 `PointValue.src_ts_ms` — it is the device clock in milliseconds, so it climbing across two reads
@@ -1206,9 +1215,73 @@ means the board stayed up.
 
 ---
 
+## 15. Config persistence and the reconcile fingerprint
+
+Boards keep their device and point config across a reboot (ADR-024, contract 0.2.0). Two things
+follow, and both change how you test.
+
+**`devices` prints a fingerprint per plane.** It is the board's own summary of the config it has
+stored:
+
+```
+modbus  292bb67d67b8fdb9
+  device 100154 unit 11   RS485_1    38400 NONE        enabled
+    point 100155   HOLDING:42000 U16  w    modbusPoint
+```
+
+Take it before a reboot, take it after, compare. Equal means the board came back holding the same
+config. That is the whole contract — the value is **opaque**: do not parse it, do not recompute
+it, do not compare one board's against another's. `(not persisted)` means firmware older than
+ADR-024, and then a host must push unconditionally.
+
+**A reconnect to an unchanged board pushes nothing.** The Control Engine reads each plane's
+fingerprint on S1 auth and skips the push when both sides are where the last successful sync left
+them — the board still reporting the fingerprint recorded then, and the bytes CE would send
+matching the bytes it sent. In `EDGELINK_DIAG=1` output:
+
+```
+CONFIGHASH peer=acbm-1cdbd4abbc7c Modbus board=292bb67d67b8fdb9 adopted
+SYNC peer=acbm-1cdbd4abbc7c Modbus unchanged on both sides — 2 chunk(s) not sent
+```
+
+Two conditions, not one. Gating only on the board's fingerprint would stop deploying wiresheet
+edits; gating only on CE's own bytes would miss a board someone re-provisioned out of band.
+
+### Testing across a reboot
+
+```bash
+./build/q_zenoh_testapp --endpoint tls/<board-ip>:7447 <<'EOF'
+login <password>
+devices
+quit
+EOF
+# note the three fingerprints, then reset the board (RTS, or power) and repeat
+```
+
+A board that comes back with different fingerprints and an empty tree did not persist — check
+its console for `cfgstore <plane>: NVS write failed`, which is logged loudly at the moment the
+write fails rather than discovered later by a board that came back empty.
+
+### What it does not cover
+
+* **The board is a replica, not a second author.** The wiresheet still owns configuration. The
+  board never invents an entry and never pushes one upward.
+* **A stale replica is possible.** A board configured, taken out of service and returned later
+  holds its old entries. CE sweeps ids its registry does not know on every auth.
+* **A snapshot READ has a ceiling.** `ModbusConfig` is declared at 4146 B against a 1536 B
+  response payload, so a registry past 26 fully-named Modbus points cannot be returned in one
+  reply. The board now answers with `reply too large: N B needed, M B available` instead of
+  sending nothing; before, the consumer just saw a timeout. Persistence itself is not affected —
+  the NVS blob is sized to the message bound, not to the envelope.
+
+---
+
 ## Related
 
-* [`../proto/`](../proto) — the contract, copied from `control-engine-docs/Contracts/proto-contracts`
+* `control-engine-docs/Contracts/proto-contracts/proto` — the contract this tool builds against
+  when a checkout sits beside it (CMake says which source it used). [`../proto/`](../proto) is a
+  bundled fallback for standalone builds and can lag — it did, and a board field this tool had
+  never heard of printed as absent rather than as an error.
 * [`../scripts/gen-proto-tables.py`](../scripts/gen-proto-tables.py) — generates the schema
   tables for this tool and for the firmware
 * `ACB-M/components/app_zenoh/zenoh_trace.c` — the board-side tracer
