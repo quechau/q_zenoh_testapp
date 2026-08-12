@@ -728,6 +728,38 @@ I ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/system.auth/ack/ce-acf23c0d8637/2178265
 
 Leave the board quiet again with `param_set 710 0` — the level lives in NVS and survives reboots.
 
+### The Control Engine against the same board
+
+The real consumer, not a test client. It needs the CE's own mTLS identity and its S1 password
+file; `run-demo.sh` finds both and refuses to start on the one failure that looks like a wrong
+password but is not — the CE deriving its `client_id` from a different NIC than the one its
+certificate was issued for (ADR-016 compares the two).
+
+```bash
+cd ~/qs/repos-no-5/ce-edgelink
+./scripts/preflight.sh            # read-only checks; starts nothing
+./scripts/run-demo.sh             # engine + wiresheet + the edgelink extension
+tail -f /tmp/edgelink-diag.log
+```
+
+What a healthy attach looks like — each line is a different thing working:
+
+```
+MDNS discovered peer=acbm-1cdbd4abbc7c -> tls/acbm-1cdbd4abbc7c.local:7447
+JOIN   peer=acbm-1cdbd4abbc7c
+AUTH   peer=acbm-1cdbd4abbc7c result=OK (unlocked)
+SYNC   svc=modbus.config outcome=0 rejected=0 peer=acbm-1cdbd4abbc7c via=zenoh
+NOTIFY key=rubix/acbm-1cdbd4abbc7c/svc/modbus.points/notify bytes=39 via=zenoh
+```
+
+`AUTH … result=OK` is the one to look for after any change to the keyspace: it means a request
+went out and **its reply came back**, so the ack subscription still matches what the board
+publishes. A wrong subscription does not produce an error — it produces a board that appears
+never to answer, which reads as `alive=1 authed=0` forever.
+
+The CE and this tool can drive the same board at once; they are different consumers with
+different `client_id`s and each receives only its own replies.
+
 ### Start from nothing
 
 ```bash
