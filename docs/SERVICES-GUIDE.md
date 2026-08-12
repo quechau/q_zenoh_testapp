@@ -527,9 +527,26 @@ The board's tracer puts the service and seq on its header line, so a request can
 the consumer's own log even when several are talking at once:
 
 ```
-I (125849) ZTR: RX << modbus.points  seq=2711876009  44 bytes
-I (125855) ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/modbus.points/ack/ce-acf23c0d8637  seq=2711876009  27 bytes
+consumer                                              board
+
+REQ  system.auth EXECUTE      seq=1056147149   74B
+                                    I (53968) ZTR: RX << system.auth  seq=1056147149  74 bytes
+                                    I (53973) ZTR: TX >> …/system.auth/ack/ce-acf23c0d8637
+                                                         seq=1056147149  27 bytes
+ACK  system.auth EXECUTE      seq=1056147149   27B  round trip 352 ms
+
+REQ  modbus.points READ       seq=1056147150   48B
+                                    I (54399) ZTR: RX << modbus.points  seq=1056147150  48 bytes
+                                    I (54404) ZTR: TX >> …/modbus.points/ack/ce-acf23c0d8637
+                                                         seq=1056147150  27 bytes
+ACK  modbus.points READ       seq=1056147150   27B  round trip 150 ms
 ```
+
+Byte counts match on both sides of every line, which is the cheap check that nothing is being
+altered in transit. Note also what the timings say: the board turns a request around in about
+**5 ms** (53968 → 53973), while the consumer measures 50–350 ms. The difference is this tool's
+own work — it declares the ack subscriber per request and settles before publishing — not the
+board being slow. Measure the board with the board's clock.
 
 ### Should the transaction id go in the key instead?
 
