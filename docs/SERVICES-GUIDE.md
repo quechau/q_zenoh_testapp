@@ -861,6 +861,139 @@ different `client_id`s and each receives only its own replies.
 } | timeout 120 ./build/q_zenoh_testapp --endpoint "$EP"
 ```
 
+
+---
+
+## 13. Cookbook — the operations, one at a time
+
+Everything below assumes `EP` and `PW` from §12 and a `login` first. Point and device ids are
+**yours to choose**: the host owns them, the board only stores them.
+
+### List what a board has
+
+```bash
+printf "login $PW\nconfig modbus read\nquit\n" | ./build/q_zenoh_testapp --endpoint "$EP"
+```
+
+The reply is the board's own snapshot — every device and every point it currently holds. **No
+payload means no points**, not a failure: `ModbusConfig` with nothing in it encodes to zero
+bytes. Swap `modbus` for `bacnet` or `lora`; each protocol has its own config plane.
+
+Remember this is RAM: a board restart empties it and the host re-syncs (§10).
+
+### Read values
+
+```bash
+points modbus read                 # every point
+points modbus read 201             # one point
+points modbus read 201 202 204     # several
+```
+
+`read` with no ids sends `PointReadRequest{all: true}` rather than an empty payload — "no ids and
+not `all`" is a different request from "everything".
+
+### Write one point
+
+```bash
+points bacnet write point_id=306 value=0     # relay off
+points bacnet write point_id=306 value=1     # relay on
+points modbus write point_id=202 value=250   # HVAC setpoint 25.0 °C (units are 0.1 °C)
+```
+
+Three things decide whether a write lands:
+
+* the point must have been provisioned `writable=true` — the flag lives in the point definition,
+  not in the write, and without it the board answers `WR_NOT_WRITABLE` and never touches the bus;
+* the protocol may refuse regardless — BACnet rejects writes to `OBJ_AI`/`OBJ_BI` by object type,
+  and every LoRa write is refused until actuator channels land;
+* `accepted: true` means the **device cache** took it. The bus confirmation is the value reading
+  back, and those are not the same event (§12).
+
+### Provision a device, then its points
+
+A device first — points reference it by `device_ref` and a point naming a device that does not
+exist is rejected `REJ_UNKNOWN_REF`.
+
+```bash
+# Modbus: a slave on RS485-1, with its own line rate
+config modbus add-device device_id=11 unit_id=11 interface=IF_RS485_1 enabled=true \
+                         baud=38400 parity=PAR_NONE
+
+# BACnet: an MS/TP MAC on the board's segment. No discovery — a wrong MAC is a faulted point
+config bacnet add-device device_id=1 mac_addr=4 enabled=true
+
+# LoRa: the 32-bit address the sensor prints at boot
+config lora add-device device_id=1 dev_addr=0x6CC06351 enabled=true
+```
+
+Then points. The fields differ per protocol because this is where the buses genuinely differ —
+`address` for Modbus, `obj_type`+`obj_instance` for BACnet, `field` for LoRa:
+
+```bash
+config modbus add-point point_id=201 device_ref=11 reg_type=REG_HOLDING address=999 \
+                        data_type=DT_U16 scale=1 poll_class=POLL_FAST name=zcd-alive
+
+config bacnet add-point point_id=306 device_ref=1 obj_type=OBJ_BO obj_instance=6 \
+                        scale=1 writable=true poll_class=POLL_FAST name=relay6
+
+config lora add-point point_id=401 device_ref=1 field=FIELD_TEMPERATURE scale=1 \
+                      writable=false name=air-temp
+```
+
+Type a field name the `.proto` does not declare and the tool prints the ones it does, with the
+legal values for every enum — so the contract is the reference, not this page:
+
+```
+ERR   'register_type' is not a field of rubix.embedded.modbus.v1.ModbusPointDef
+HINT  rubix.embedded.modbus.v1.ModbusPointDef accepts:
+        point_id       uint
+        device_ref     uint
+        reg_type       enum: REG_UNSPECIFIED REG_COIL REG_DISCRETE REG_INPUT REG_HOLDING
+        address        uint
+        data_type      enum: DT_UNSPECIFIED DT_U16 DT_I16 DT_U32 DT_I32 DT_F32 DT_BIT
+        ...
+```
+
+### Change something already provisioned
+
+Send the definition again with the same id. It is an upsert, and the board says which it was:
+
+```
+LIFECYCLE point=201 ... unchanged            nothing moved
+LIFECYCLE point=201 ... re-provisioned       the definition changed
+```
+
+Changing a **device's** `unit_id`, port, `baud` or `parity` invalidates every point under it —
+they are re-provisioned against the new line, and their values start again from nothing.
+
+### Remove
+
+```bash
+config modbus del-point 201 202       # several at once
+config modbus del-device 11           # its points go too
+```
+
+### Watch values change
+
+```bash
+points modbus sub 30        # 30 seconds of the COV stream
+```
+
+Nothing requests these — the board publishes when a value changes. Each frame is a
+`ResponseEnvelope` with `is_notification: true`, on
+`rubix/<board>/svc/<svc>/notify/<device-ms>`. A quiet stream means nothing changed, which on a
+stable bus is the normal state; it is not a failure to receive.
+
+### Reach a board you cannot address
+
+```bash
+./build/q_zenoh_testapp scan            # mDNS for the name, a TCP sweep for the address
+./build/q_zenoh_testapp discover 8      # listen for announce beacons — also prints the nonce
+```
+
+`discover` is what `login` runs when it needs a nonce, because the proof is
+`sha256(nonce : client_id : sha256(password))` and **the nonce changes on every board reboot**.
+
 ---
 
 ## Related
