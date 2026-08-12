@@ -68,7 +68,7 @@ bare name is ambiguous; always qualify — `rubix.embedded.modbus.v1.PointWrite`
     2 service_id     5 client_id    8 payload   ← note: 8
     3 op             6 deadline_ms
         │
-  publish → rubix/<board>/svc/<service>/req
+  publish → req/<seq>/<board>/svc/<service>
                                    │
                                    ├─ zenoh read task: copy to a queue, nothing else
                                    │
@@ -86,7 +86,7 @@ bare name is ambiguous; always qualify — `rubix.embedded.modbus.v1.PointWrite`
                                         2 service_id    5 encoding  8 is_notification
                                         3 op            6 payload   ← note: 6
                                    │
-  ← rubix/<board>/svc/<service>/res/<client_id>
+  ← res/<seq>/<client_id>/<board>/svc/<service>
 ```
 
 **The envelopes are not symmetric.** A request carries its payload in field **8**; a response in
@@ -100,7 +100,7 @@ message, not a number — reading field 7 as a varint finds nothing, which is wh
 once printed as two anonymous bytes `08 04` (`ERROR_PERMISSION`).
 
 **Notifications reuse the response envelope** with `is_notification = true`, published on
-`rubix/<board>/svc/<service>/notify` rather than an ack key. Nothing requests them; the board
+`cov/<device-ms>/<board>/svc/<service>` rather than an ack key. Nothing requests them; the board
 publishes a batch when values change (COV).
 
 ### Absent fields are not missing data
@@ -256,7 +256,7 @@ board reboots, the nonce changes, the grant is gone), not that the request is ma
 Provisioning one Modbus device, byte for byte:
 
 ```
-REQ  rubix/acbm-1cdbd4abbc7c/svc/modbus.config/req  57B
+REQ  req/<seq>/acbm-1cdbd4abbc7c/svc/modbus.config  57B
   json
   { "wire_version": 1, "service_id": "modbus.config", "op": "OP_WRITE", "seq": 58888,
     "client_id": "ce-acf23c0d8637",
@@ -558,7 +558,7 @@ correctly configured port, an unreachable device, and a consumer with no way to 
 ### What pins what
 
 ```
-rubix/<board>/svc/<service>/res/<client_id>/<seq>
+res/<seq>/<client_id>/<board>/svc/<service>
       ───┬───     ───┬───       ────┬────    ─┬─
      which board  which API   which consumer  which call
 ```
@@ -574,7 +574,7 @@ envelope is the contract.** A consumer that skips the check because the key alre
 trusting a routing hint with correctness.
 
 **Subscribe with a trailing `**`.** It matches any number of chunks including zero, so
-`rubix/*/svc/*/res/<client_id>/**` matches boards that append the id and boards that do not —
+`res/**/<client_id>/*/svc/*` matches boards that append the id and boards that do not —
 which is what makes the two ends upgradable in either order. An exact key without it matches
 neither shape once the other ships, and the failure is silent: no error, no log, no replies.
 
@@ -688,7 +688,7 @@ together — a consumer left on an exact old key receives nothing and says nothi
 | | |
 |---|---|
 | `ACB-M app_zenoh.c` | publishes `…/res/<client_id>/<seq>` |
-| `ce-edgelink zenoh_transport.cpp` | subscribes `rubix/*/svc/*/res/<cid>/**` |
+| `ce-edgelink zenoh_transport.cpp` | subscribes `res/**/<cid>/*/svc/*` |
 | `ce-edgelink zenoh_peer_probe.cpp` | same |
 | `ce-mobile keysV1.ts` | `ackAll` gains `/**`; `ack(...)` takes an optional seq; `parseAckKey` returns it |
 | `ACB-M poc/zenoh-e2e/zprobe.py` | subscribes with `/**` |
@@ -853,8 +853,8 @@ grep -E "(REQ|ACK) " /tmp/client.txt
 ```
 
 ```
-I ZTR: RX << rubix/acbm-1cdbd4abbc7c/svc/system.auth/req                             seq=2178265798   74 bytes
-I ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/system.auth/res/ce-acf23c0d8637/2178265798  seq=2178265798   27 bytes
+I ZTR: RX << req/<seq>/acbm-1cdbd4abbc7c/svc/system.auth                             seq=2178265798   74 bytes
+I ZTR: TX >> res/2178265798/ce-acf23c0d8637/acbm-1cdbd4abbc7c/svc/system.auth  seq=2178265798   27 bytes
 ```
 
 Leave the board quiet again with `param_set 710 0` — the level lives in NVS and survives reboots.
@@ -880,7 +880,7 @@ MDNS discovered peer=acbm-1cdbd4abbc7c -> tls/acbm-1cdbd4abbc7c.local:7447
 JOIN   peer=acbm-1cdbd4abbc7c
 AUTH   peer=acbm-1cdbd4abbc7c result=OK (unlocked)
 SYNC   svc=modbus.config outcome=0 rejected=0 peer=acbm-1cdbd4abbc7c via=zenoh
-NOTIFY key=rubix/acbm-1cdbd4abbc7c/svc/modbus.points/notify bytes=39 via=zenoh
+NOTIFY key=cov/<device-ms>/acbm-1cdbd4abbc7c/svc/modbus.points bytes=39 via=zenoh
 ```
 
 `AUTH … result=OK` is the one to look for after any change to the keyspace: it means a request
@@ -1023,7 +1023,7 @@ points modbus sub 30        # 30 seconds of the COV stream
 
 Nothing requests these — the board publishes when a value changes. Each frame is a
 `ResponseEnvelope` with `is_notification: true`, on
-`rubix/<board>/svc/<svc>/notify/<device-ms>`. A quiet stream means nothing changed, which on a
+`cov/<device-ms>/<board>/svc/<svc>`. A quiet stream means nothing changed, which on a
 stable bus is the normal state; it is not a failure to receive.
 
 ### Reach a board you cannot address

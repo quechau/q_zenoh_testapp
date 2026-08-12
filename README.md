@@ -8,7 +8,7 @@ what a real consumer would experience — not what a differently-built client ha
 
 ```
 q> login <password>
-  REQ  rubix/acbm-1cdbd4abbc7c/svc/system.auth/req  72B  seq=34167
+  REQ  req/<seq>/acbm-1cdbd4abbc7c/svc/system.auth  72B  seq=34167
         json
         { "wire_version": 1, "service_id": "system.auth", "op": 5, "seq": 34167,
           "client_id": "ce-acf23c0d8637", "payload": "d1a7d9c0…95a7faca" }
