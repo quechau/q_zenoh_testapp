@@ -178,7 +178,8 @@ with that slave, so slaves at different rates can share one RS485 bus, time-mult
 > Found by this test: firmware up to and including the `Aug 10 2026` build **accepts** `baud`
 > and `parity` and applies them, but omits both from the config READ snapshot. A host doing the
 > obvious read-modify-write would silently reset every device it echoed back to the port
-> default. Fixed in `zenoh_modbus.c`; a board flashed before that fix answers without them.
+> default. Fixed in `zenoh_modbus.c` and verified on hardware — `baud=19200 parity=PAR_ODD` now
+> reads back. A board flashed before that fix answers without them.
 
 ### BACnet MS/TP
 
@@ -310,11 +311,37 @@ transmit defaults.
 The same two views exist in the firmware. On the board's console:
 
 ```
-param_set 710 2        # 0 off, 1 JSON, 2 JSON + full hex; effective within ~5 s
+acb-m-riot> login technician 123456      # param_set needs Technician or higher
+acb-m-riot> param_set 710 2              # 0 off, 1 JSON, 2 JSON + full hex; live within ~5 s
 ```
 
 Both ends then print the same packet from their own vantage point, which is the only way to
-settle "the board never got it" against "the board ignored it".
+settle "the board never got it" against "the board ignored it". The board's view of the
+`add-point` above:
+
+```
+I (175315) ZTR: RX << modbus.config  65 bytes
+  encoded (65 B)
+    08 01 12 0d 6d 6f 64 62 75 73 2e 63 6f 6e 66 69 67 18 02 20 c2 9d 01 2a 0f 63 65 2d 61 63 66 32
+    33 63 30 64 38 36 33 37 42 17 12 15 08 66 10 01 18 03 20 07 28 05 35 cd cc cc 3d 4a 04 66 6c 6f
+    77
+  json
+  {
+    "wire_version": 1, "service_id": "modbus.config", "op": "OP_WRITE", "seq": 20162,
+    "client_id": "ce-acf23c0d8637",
+    "payload": { "upsert_points": { "point_id": 102, "device_ref": 1,
+                                    "reg_type": "REG_INPUT", "address": 7,
+                                    "data_type": "DT_F32", "scale": 0.1, "name": "flow" } }
+  }
+```
+
+`35 cd cc cc 3d` is `scale`: field 6, wire type 5, and the four bytes of the float `0.1`. A
+`double` would have been eight bytes on wire type 1 — the declared type is what tells the two
+ends apart, which is why both read it from the same generated schema rather than guessing.
+
+Tracing prints from the dispatch task, never the zenoh read callbacks, so a slow console cannot
+stall reception. It is still UART-speed: level 2 on a 640-byte request is about 2 KB of output,
+roughly 170 ms at 115200 baud. That is why it is off by default.
 
 ---
 
