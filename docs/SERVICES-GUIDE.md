@@ -523,25 +523,35 @@ with device 11 and its points provisioned less than a minute earlier.
 Take the board-side capture in a separate run from the provisioning, or accept that the trace
 starts from a blank board.
 
-### The ZC-Damper register map is not hardware-verified
+### The ZC-Damper addresses are right; the device stopped answering
 
-`ACB-M/docs/Modbus-Module/zc-damper-control-test` says so itself — its values are derived from
-source and were never run against the device. Measured here: `address=999` (holding, the alive
-register) reads `53521` cleanly with no master errors, exactly as documented. `address=42000`
-(damper 0 target) makes the master log `Address of holding registers returned from slave 11 is
-invalid` on every poll, with a single point provisioned and nothing else on the bus.
+`ACB-M/docs/Modbus-Module/zc-damper-control-test` says of itself that it was derived from source
+and never run. It has been run: `ce-edgelink/docs/evidence/e2e-setget-20260717` is a working
+wiresheet against this same board and damper, and its three points are exactly the addresses
+this guide uses.
 
-So a write to it is `accepted` — that is the device cache accepting it, which the contract is
-explicit about — and nothing reads back. Do not treat the damper half of that document as
-verified until someone runs it.
+| point | reg type | `address` | measured there |
+|---|---|---|---|
+| `alive` | HOLDING | 999 | `out = 53521`, ok |
+| `position-d0` | INPUT | 999 | `out = 100`, ok |
+| `target-d0` | HOLDING | 42000 | `out = 100`, ok, `writable = true` |
 
-Later in the same session the damper stopped answering altogether: the alive register that had
-read `53521` reliably returned nothing, with RS485-1 still `38400-8-N-1` and its role still
-Modbus master (`0x0250`, `0x0241` read back from the console). Whatever changed is on the wire
-or in the device, not in the configuration.
+So `42000` reads back when the damper is answering, and holding 999 and input 999 really are two
+different tables at the same PDU address, separated only by the function code.
 
-Which makes it the cleanest demonstration of the defect above: the port is right, the device is
-unreachable, and the point still reports **`Q_GOOD`**. A consumer has no way to tell.
+In this session `address=999` read `53521` cleanly, and later `address=42000` made the master
+log `Address of holding registers returned from slave 11 is invalid` on every poll — with a
+single point provisioned and nothing else on the bus — and later still the alive register went
+quiet too, with RS485-1 unchanged at `38400-8-N-1` and role Modbus master (`0x0250` and `0x0241`
+read back from the console).
+
+Given the July evidence, that is the device or the wiring, not the addressing. **An earlier
+revision of this section concluded the document's damper half was wrong. It is not** — the
+evidence above predates and contradicts that, and it was the reading I should have checked
+before writing the conclusion.
+
+What survives, and matters more: through all of it the points kept reporting **`Q_GOOD`**. A
+correctly configured port, an unreachable device, and a consumer with no way to tell.
 
 ## 11. Telling concurrent calls apart
 
