@@ -72,6 +72,14 @@ static void *pump(void *arg)
                 emit(pending, held);
                 held = 0;
             }
+            /* A '[' after non-log text starts a new line even though no newline separated
+             * them: the prompt is written without one, so "q> " and the log line that follows
+             * arrive in the same read. Left joined, the log line no longer begins with '[' and
+             * slips past the filter — which is exactly what happened. */
+            if (chunk[i] == '[' && held > 0 && pending[0] != '[') {
+                emit(pending, held);
+                held = 0;
+            }
             pending[held++] = chunk[i];
             if (chunk[i] != '\n') continue;
 

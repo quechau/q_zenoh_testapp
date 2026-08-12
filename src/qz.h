@@ -98,6 +98,14 @@ void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char
 const char *qz_error_name(uint64_t code);
 
 /** Copies out a length-delimited field. Returns its length, or 0 when absent. */
+/* build.c — payloads assembled from `field=value` using the generated contract schema, so
+ * field names and enum labels are the .proto's own and never a second copy of them. */
+struct qz_pmsg;
+int    qz_build(const struct qz_pmsg *msg, int argc, char **argv, uint8_t *out, size_t cap,
+                size_t *len);
+size_t qz_wrap(uint8_t *out, size_t cap, uint32_t field, const uint8_t *sub, size_t sublen);
+size_t qz_packed_u32(uint8_t *out, size_t cap, uint32_t field, const uint32_t *ids, size_t n);
+
 size_t qz_field_bytes(const uint8_t *buf, size_t len, uint32_t field,
                       const uint8_t **out);
 

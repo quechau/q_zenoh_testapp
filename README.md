@@ -107,6 +107,8 @@ q> req modbus.points read
 | `logout` | `system.auth` with an empty payload |
 | `sub <keyexpr> [secs]` | subscribe and decode every envelope that arrives |
 | `pub <keyexpr> <text>` | publish a raw payload |
+| `points <proto> read\|write\|sub` | the data plane: values, one write, the COV stream |
+| `config <proto> read\|add-device\|add-point\|del-device\|del-point` | the control plane, always a delta |
 | `req <service> [op]` | protobuf request/reply; `op` = read, write, execute, ping, … |
 | `boardinfo`, `points` | shorthands for the two common reads |
 | `enroll <id> [SAN]` | get a certificate from the CA and write it into `--certs` |
@@ -182,6 +184,9 @@ src/util.c      hashing, base64, certificate CN
 
 ## Related
 
+* [docs/SERVICES-GUIDE.md](docs/SERVICES-GUIDE.md) — how the proto files relate, what each
+  service carries, the request/reply sequence, and the commands that drive modbus, bacnet and
+  lora end to end
 * `ACB-M/docs/Zenoh-Module/` — the firmware side, including the two-session design, the
   manual test walkthrough and the peer capacity measurements
 * `ACB-M/poc/zenoh-e2e/` — the Python equivalents of these tests

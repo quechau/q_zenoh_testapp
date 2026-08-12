@@ -1,5 +1,6 @@
 /** main.c — argument handling, the one-shot commands, and the interactive REPL. */
 #include "qz.h"
+#include "proto_tables.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +55,15 @@ static void usage(void)
 "  logout                  system.auth with an empty payload\n"
 "  sub <keyexpr> [secs]    subscribe and decode what arrives\n"
 "  pub <keyexpr> <text>    publish a raw payload\n"
+"  points <proto> read [ids...]      read point values (no ids = all)\n"
+"  points <proto> write field=value  write one point, e.g. point_id=101 value=42\n"
+"  points <proto> sub [secs]         subscribe to the COV notify stream\n"
+"  config <proto> read               full config snapshot from the board\n"
+"  config <proto> add-device field=value ...   upsert one device (a delta)\n"
+"  config <proto> add-point  field=value ...   upsert one point  (a delta)\n"
+"  config <proto> del-device|del-point <id>...\n"
+"        <proto> is modbus, bacnet or lora. Field names and enum values are the\n"
+"        contract's own; a wrong one lists what the .proto actually declares.\n"
 "  req <service> [op]      protobuf request/reply; op = read|write|execute|ping|discover\n"
 "  boardinfo               shorthand for `req system.boardinfo read`\n"
 "  points                  shorthand for `req modbus.points read`\n"
@@ -100,6 +110,35 @@ static int need_session(qz_ctx_t *ctx)
         }
     }
     return qz_session_open(ctx);
+}
+
+
+/* The three field-bus services are the same shape with different leaf messages, so the
+ * commands below are written once and the message is looked up per protocol. Names are built
+ * fully qualified — PointWrite exists in all three packages, and a suffix match would pick
+ * whichever sorted first. */
+static const qz_pmsg_t *msg_for(const char *proto, const char *shape)
+{
+    char name[128], Proto[16];
+    snprintf(Proto, sizeof Proto, "%s", proto);
+    if (Proto[0] >= 'a' && Proto[0] <= 'z') Proto[0] = (char)(Proto[0] - 32);
+    if (strstr(shape, "%s") != NULL) {
+        char leaf[64];
+        snprintf(leaf, sizeof leaf, shape, Proto);
+        snprintf(name, sizeof name, "rubix.embedded.%s.v1.%s", proto, leaf);
+    } else {
+        snprintf(name, sizeof name, "rubix.embedded.%s.v1.%s", proto, shape);
+    }
+    const qz_pmsg_t *m = qz_msg_find(name);
+    if (m == NULL) qz_log("ERR", "the contract has no %s", name);
+    return m;
+}
+
+static bool known_proto(const char *p)
+{
+    if (strcmp(p, "modbus") == 0 || strcmp(p, "bacnet") == 0 || strcmp(p, "lora") == 0) return true;
+    qz_log("ERR", "protocol must be modbus, bacnet or lora (got '%s')", p);
+    return false;
 }
 
 int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
@@ -156,6 +195,84 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         if (need_session(ctx) != 0) return -1;
         return qz_request(ctx, "system.auth", QZ_OP_EXECUTE, NULL, 0, 10);
     }
+    /* points <proto> read|write|sub — the data plane */
+    if (strcmp(cmd, "points") == 0 && argc >= 3) {
+        if (!known_proto(argv[1])) return -1;
+        char service[32];
+        snprintf(service, sizeof service, "%s.points", argv[1]);
+        if (need_session(ctx) != 0) return -1;
+        if (ctx->board[0] == '\0') qz_discover(ctx, 4);
+
+        if (strcmp(argv[2], "read") == 0) {
+            uint8_t payload[256];
+            size_t plen = 0;
+            if (argc > 3) {                       /* an explicit id list */
+                uint32_t ids[32];
+                size_t n = 0;
+                for (int i = 3; i < argc && n < 32; i++) ids[n++] = (uint32_t)strtoul(argv[i], NULL, 0);
+                plen = qz_packed_u32(payload, sizeof payload, 1, ids, n);
+            } else {
+                /* PointReadRequest.all — an empty payload would read as "no ids and not all",
+                 * which is a different request from "everything". */
+                char *all[] = { (char *)"all=true" };
+                if (qz_build(msg_for(argv[1], "PointReadRequest"), 1, all,
+                             payload, sizeof payload, &plen) != 0) return -1;
+            }
+            return qz_request(ctx, service, QZ_OP_READ, payload, plen, 10);
+        }
+        if (strcmp(argv[2], "write") == 0) {
+            uint8_t payload[256];
+            size_t plen = 0;
+            if (qz_build(msg_for(argv[1], "PointWrite"), argc - 3, argv + 3,
+                         payload, sizeof payload, &plen) != 0) return -1;
+            return qz_request(ctx, service, QZ_OP_WRITE, payload, plen, 10);
+        }
+        if (strcmp(argv[2], "sub") == 0) {
+            char key[192];
+            snprintf(key, sizeof key, "rubix/%s/svc/%s/notify", ctx->board, service);
+            return qz_subscribe(ctx, key, argc > 3 ? (unsigned)atoi(argv[3]) : 30) >= 0 ? 0 : -1;
+        }
+        qz_log("ERR", "points <proto> read|write|sub");
+        return -1;
+    }
+
+    /* config <proto> read|add-device|add-point|del-device|del-point — the control plane.
+     * Every write is a DELTA: the contract has no replaceAll, so nothing here can clear a
+     * board by omission. */
+    if (strcmp(cmd, "config") == 0 && argc >= 3) {
+        if (!known_proto(argv[1])) return -1;
+        char service[32];
+        snprintf(service, sizeof service, "%s.config", argv[1]);
+        if (need_session(ctx) != 0) return -1;
+        if (ctx->board[0] == '\0') qz_discover(ctx, 4);
+
+        if (strcmp(argv[2], "read") == 0)
+            return qz_request(ctx, service, QZ_OP_READ, NULL, 0, 10);
+
+        uint8_t leaf[384], delta[512];
+        size_t llen = 0, dlen = 0;
+        if (strcmp(argv[2], "add-device") == 0) {
+            if (qz_build(msg_for(argv[1], "%sDeviceDef"), argc - 3, argv + 3,
+                         leaf, sizeof leaf, &llen) != 0) return -1;
+            dlen = qz_wrap(delta, sizeof delta, 1, leaf, llen);       /* upsert_devices */
+        } else if (strcmp(argv[2], "add-point") == 0) {
+            if (qz_build(msg_for(argv[1], "%sPointDef"), argc - 3, argv + 3,
+                         leaf, sizeof leaf, &llen) != 0) return -1;
+            dlen = qz_wrap(delta, sizeof delta, 2, leaf, llen);       /* upsert_points */
+        } else if (strcmp(argv[2], "del-device") == 0 || strcmp(argv[2], "del-point") == 0) {
+            if (argc < 4) { qz_log("ERR", "config <proto> %s <id>", argv[2]); return -1; }
+            uint32_t ids[16];
+            size_t n = 0;
+            for (int i = 3; i < argc && n < 16; i++) ids[n++] = (uint32_t)strtoul(argv[i], NULL, 0);
+            dlen = qz_packed_u32(delta, sizeof delta,
+                                 strcmp(argv[2], "del-device") == 0 ? 3 : 4, ids, n);
+        } else {
+            qz_log("ERR", "config <proto> read|add-device|add-point|del-device|del-point");
+            return -1;
+        }
+        return qz_request(ctx, service, QZ_OP_WRITE, delta, dlen, 10);
+    }
+
     if (strcmp(cmd, "req") == 0) {
         if (argc < 2) { qz_log("ERR", "req <service> [op]"); return -1; }
         if (need_session(ctx) != 0) return -1;
@@ -202,12 +319,21 @@ int qz_repl(qz_ctx_t *ctx)
         if (strcmp(line, "quit") == 0 || strcmp(line, "exit") == 0) break;
 
         /* Split on spaces, but keep the tail of `pub` intact so a payload may contain them. */
-        char *argv[8];
+        /* Room for a full `config <proto> add-point` line: nine field=value pairs plus the
+         * three leading words. It used to stop at eight tokens and drop the rest in silence,
+         * which sent a device definition missing its parity and reported success. */
+        char *argv[32];
         int argc = 0;
         char *p = line;
-        while (argc < 8 && *p != '\0') {
+        while (*p != '\0') {
             while (*p == ' ') p++;
             if (*p == '\0') break;
+            if (argc == (int)(sizeof argv / sizeof argv[0])) {
+                qz_log("ERR", "too many arguments (max %zu) — nothing was sent",
+                       sizeof argv / sizeof argv[0]);
+                argc = 0;
+                break;
+            }
             if (argc == 2 && strncmp(line, "pub ", 4) == 0) { argv[argc++] = p; break; }
             argv[argc++] = p;
             while (*p != '\0' && *p != ' ') p++;

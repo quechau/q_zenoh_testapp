@@ -1,0 +1,327 @@
+# The rubix services, and how to exercise them
+
+What the `.proto` files say, how a request becomes bytes and comes back, and the exact commands
+that drive each service against a real board. Every listing here was captured from
+`acbm-1cdbd4abbc7c`, not written from the contract.
+
+---
+
+## 1. How the proto files fit together
+
+There are two layers, and keeping them apart explains most of what follows.
+
+```
+envelope.proto ............... the transport. Every packet in both directions.
+│                              RequestEnvelope / ResponseEnvelope / ErrorInfo
+│                              ServiceOperation (OP_READ, OP_WRITE, …), ErrorCode
+│
+└── payload (bytes) ......... opaque here. Its type is decided by service_id + op.
+    │
+    ├── service_boardinfo.proto ... system.boardinfo     READ only
+    ├── modbus_config.proto ....... modbus.config        READ / WRITE
+    ├── modbus_points.proto ....... modbus.points        READ / WRITE / notify
+    ├── bacnet_config.proto ....... bacnet.config        READ / WRITE
+    ├── bacnet_points.proto ....... bacnet.points        READ / WRITE / notify
+    ├── lora_config.proto ......... lora.config          READ / WRITE
+    └── lora_points.proto ......... lora.points          READ / WRITE / notify
+```
+
+**The envelope does not name the payload's type.** `RequestEnvelope.payload` is `bytes`. A
+decoder has to read `service_id` and `op` out of the *same* envelope and look the type up in a
+table — which is what [`gen-proto-tables.py`](../scripts/gen-proto-tables.py) generates and
+what both this tool and the board's own tracer use.
+
+**The three field buses are deliberately identical past the decode.** `modbus_points.proto`,
+`bacnet_points.proto` and `lora_points.proto` are field-for-field the same: `PointValue`,
+`PointValues`, `PointReadRequest`, `PointWrite`, `WriteAck`, `Quality`, `WriteReject`. They are
+separate packages so each can version independently and so nanopb gets a concrete type per
+service — not because a point means anything different. Past the field bus a point is an id, a
+number and a quality, and a consumer needs no protocol knowledge to render one.
+
+The **config** protos are where the buses genuinely differ, because that is where a device is
+addressed:
+
+| | device is addressed by | a point selects |
+|---|---|---|
+| `modbus` | `unit_id` (1..247) + `interface` + `baud`/`parity` | `reg_type` + `address` + `data_type` |
+| `bacnet` | `mac_addr` (MS/TP MAC 0..254) | `obj_type` + `obj_instance` |
+| `lora` | `dev_addr` (32-bit LoRaRaw address) | `field` (temperature, humidity, …) |
+
+Everything else in the config plane is the same shape: `XxxConfig` is the READ snapshot,
+`XxxConfigDelta` is the WRITE, and `ConfigResult { applied_ids, rejected[] }` is the verdict.
+
+**Two names are reused across packages.** `PointValue`, `PointWrite`, `ConfigReject`,
+`ConfigResult`, `PollClass` and `Quality` each exist three times, once per package. A lookup by
+bare name is ambiguous; always qualify — `rubix.embedded.modbus.v1.PointWrite`.
+
+---
+
+## 2. Encode and decode, in the order it happens
+
+```
+  CE / test app                                board (ACB-M)
+
+  build payload  (PointWrite, ConfigDelta, …)
+        │
+  wrap in RequestEnvelope
+    1 wire_version   4 seq          7 encoding
+    2 service_id     5 client_id    8 payload   ← note: 8
+    3 op             6 deadline_ms
+        │
+  publish → rubix/<board>/svc/<service>/req
+                                   │
+                                   ├─ zenoh read task: copy to a queue, nothing else
+                                   │
+                                   ├─ dispatch task: decode envelope once
+                                   │     ADR-016 gate: envelope client_id must equal the
+                                   │     session certificate's CN, or ERROR_PERMISSION
+                                   │     S1 gate: caller must have logged in, or ERROR_PERMISSION
+                                   │     (system.boardinfo is exempt — an unenrolled board
+                                   │      must still be discoverable)
+                                   │
+                                   ├─ service handler decodes the payload with nanopb
+                                   │
+                                   └─ ResponseEnvelope
+                                        1 wire_version  4 seq       7 error
+                                        2 service_id    5 encoding  8 is_notification
+                                        3 op            6 payload   ← note: 6
+                                   │
+  ← rubix/<board>/svc/<service>/ack/<client_id>
+```
+
+**The envelopes are not symmetric.** A request carries its payload in field **8**; a response in
+field **6**. Putting a payload in a request's field 7 lands it on `encoding`, a varint enum —
+nanopb fails the whole decode, the board resets the envelope to zeros, and the request arrives
+with an empty `client_id` and is refused as a certificate mismatch. The error accuses the wrong
+thing entirely. This cost hours; it is why both ends now print the raw bytes.
+
+**A reply carries either a payload or an error, never both.** `error` is an `ErrorInfo`
+message, not a number — reading field 7 as a varint finds nothing, which is why a failed login
+once printed as two anonymous bytes `08 04` (`ERROR_PERMISSION`).
+
+**Notifications reuse the response envelope** with `is_notification = true`, published on
+`rubix/<board>/svc/<service>/notify` rather than an ack key. Nothing requests them; the board
+publishes a batch when values change (COV).
+
+### Absent fields are not missing data
+
+proto3 does not transmit default values. A `ModbusPointDef` with `address = 0` sends no address
+at all, and a `PointValues` with no entries encodes to **zero bytes** — so a board with nothing
+provisioned answers a points READ with no payload whatsoever. That is a correct empty answer,
+not a failure. The renderer prints what arrived; it will not invent a field that was not sent.
+
+---
+
+## 3. Setting up
+
+```bash
+./scripts/bootstrap.sh              # once: mbedTLS + zenoh-pico with TLS
+cmake -S . -B build && cmake --build build -j
+```
+
+Identity: `--certs DIR` needs `ca.pem`, `device.pem`, `device-key.pem`. `client_id` defaults to
+the CN of `device.pem`, because the board compares the envelope's `client_id` against the
+certificate CN on that session and refuses everything on a mismatch.
+
+```bash
+./build/q_zenoh_testapp --endpoint tls/192.168.10.29:7447     # interactive
+./build/q_zenoh_testapp boardinfo                             # or find the board itself
+```
+
+Log in first. Every service except `system.boardinfo` is gated on it:
+
+```
+q> login acbm-fabric-2026
+  AUTH  UNLOCKED as ce-acf23c0d8637
+```
+
+`login` runs `discover` when it has to, because the proof is
+`sha256(nonce : client_id : sha256(password))` and **the nonce changes on every board reboot**.
+A cached nonce produces a wrong proof that is indistinguishable from a wrong password — both
+come back `ERROR_PERMISSION`.
+
+---
+
+## 4. The commands, per service
+
+`<proto>` is `modbus`, `bacnet` or `lora` throughout. Field names and enum values are the
+contract's own — a wrong one prints what the `.proto` actually declares rather than guessing.
+
+| Command | Sends | Expects back |
+|---|---|---|
+| `boardinfo` | `system.boardinfo` READ, empty | `GetBoardInfoResponse` |
+| `config <proto> read` | `<proto>.config` READ, empty | `XxxConfig` snapshot |
+| `config <proto> add-device f=v …` | `XxxConfigDelta.upsert_devices` | `ConfigResult` |
+| `config <proto> add-point f=v …` | `XxxConfigDelta.upsert_points` | `ConfigResult` |
+| `config <proto> del-device <id>…` | `remove_device_ids` | `ConfigResult` |
+| `config <proto> del-point <id>…` | `remove_point_ids` | `ConfigResult` |
+| `points <proto> read [ids…]` | `PointReadRequest` | `PointValues` |
+| `points <proto> write f=v …` | `PointWrite` | `WriteAck` |
+| `points <proto> sub [secs]` | subscribes to `…/notify` | `PointValues`, `is_notification` |
+
+Every config WRITE is a **delta**. The contract has no replace-all, by design: nothing you send
+can clear a board by omission.
+
+### Modbus
+
+```
+q> config modbus add-device device_id=1 unit_id=11 interface=IF_RS485_1 enabled=true baud=9600 parity=PAR_NONE
+q> config modbus add-point  point_id=101 device_ref=1 reg_type=REG_HOLDING address=0 data_type=DT_U16 scale=1 writable=true poll_class=POLL_NORMAL name=test-point
+q> points modbus read
+q> points modbus write point_id=101 value=42
+```
+
+`baud` is per device, not per port: the board applies baud and parity before each transaction
+with that slave, so slaves at different rates can share one RS485 bus, time-multiplexed.
+`baud=0` means keep the port's boot default.
+
+> Found by this test: firmware up to and including the `Aug 10 2026` build **accepts** `baud`
+> and `parity` and applies them, but omits both from the config READ snapshot. A host doing the
+> obvious read-modify-write would silently reset every device it echoed back to the port
+> default. Fixed in `zenoh_modbus.c`; a board flashed before that fix answers without them.
+
+### BACnet MS/TP
+
+```
+q> config bacnet add-device device_id=1 mac_addr=11 enabled=true
+q> config bacnet add-point  point_id=201 device_ref=1 obj_type=OBJ_AV obj_instance=1 scale=1 writable=true poll_class=POLL_NORMAL name=relay6
+q> points bacnet read
+```
+
+There is no discovery — the board's master never sends Who-Is. It synthesises an address-cache
+entry from `mac_addr` alone, so a wrong MAC is a permanently faulted point, not an error.
+
+**Writes are permanent.** The master issues WriteProperty at priority 1 and never relinquishes:
+the first value written seizes that point's priority-1 slot on the target device until the
+target reboots, overriding local logic and any BMS command. Only mark points writable when that
+is the intent. Writes to `OBJ_AI`/`OBJ_BI` are rejected outright regardless of the `writable`
+flag, because the master decides writability from the object type.
+
+### LoRa (Droplet)
+
+```
+q> config lora add-device device_id=1 dev_addr=0x6CC06351 enabled=true
+q> config lora add-point  point_id=301 device_ref=1 field=FIELD_TEMPERATURE scale=1 writable=false name=air-temp
+q> points lora sub 300
+```
+
+The LoRa bus is **push, not poll**. A Droplet broadcasts every few minutes and sleeps; the board
+cannot ask it anything. So there is no `poll_class`, a freshly provisioned point stays faulted
+until the sensor transmits, and `points lora sub` with a long window is the honest way to watch
+it. Every write is rejected `WR_NOT_WRITABLE` until actuator channels land — decided by the
+field, the same way BACnet decides by object type.
+
+---
+
+## 5. The script
+
+```bash
+./scripts/test-services.sh modbus --endpoint tls/192.168.10.29:7447
+./scripts/test-services.sh bacnet --clean
+./scripts/test-services.sh lora   --sub-secs 300
+```
+
+It runs the whole sequence in dependency order — provision, read back, read values, write,
+listen — and prints both views of every packet. Options: `--endpoint`, `--password`,
+`--device-id`, `--point-id`, `--sub-secs`, `--clean`.
+
+---
+
+## 6. Reading the answer
+
+```
+applied_ids: [1]              accepted
+rejected: [{id, reason}]      REJ_BAD_ID (id outside the middleware range), REJ_UNKNOWN_REF
+                              (point references a device that does not exist), REJ_POOL_FULL,
+                              REJ_IFACE_ROLE (the port is not configured as a master),
+                              REJ_DUPLICATE, REJ_INVALID
+quality: "Q_GOOD"             the field bus answered
+quality: "Q_FAULT"            provisioned, but the device is not answering — wrong unit id /
+                              MAC / dev_addr, wrong register, or a line rate the slave does
+                              not use
+accepted: true                the write reached the device cache. NOT bus-confirmation: the
+                              authoritative confirmation is the value coming back on a read
+error: { code: … }            the request never reached a handler at all
+no payload                    an empty result, which is a valid answer
+```
+
+`ERROR_PERMISSION` on a service that worked a minute ago usually means the login lapsed (the
+board reboots, the nonce changes, the grant is gone), not that the request is malformed.
+
+---
+
+## 7. Worked example, captured from the board
+
+Provisioning one Modbus device, byte for byte:
+
+```
+REQ  rubix/acbm-1cdbd4abbc7c/svc/modbus.config/req  57B
+  json
+  { "wire_version": 1, "service_id": "modbus.config", "op": "OP_WRITE", "seq": 58888,
+    "client_id": "ce-acf23c0d8637",
+    "payload": { "upsert_devices": { "device_id": 1, "unit_id": 11,
+                                     "interface": "IF_RS485_1", "enabled": true,
+                                     "baud": 9600, "parity": "PAR_NONE" } } }
+  encoded (57 B)
+    08 01 12 0d 6d 6f 64 62 75 73 2e 63 6f 6e 66 69 67 18 02 20 88 cc 03 2a 0f 63 65 2d 61 63 66 32
+    33 63 30 64 38 36 33 37 42 0f 0a 0d 08 01 10 0b 18 01 20 01 28 80 4b 30 01
+
+ACK  seq=58888  30B  round trip 50 ms
+  { …, "payload": { "applied_ids": [1] } }
+```
+
+Follow the payload bytes: `42 0f` is field 8 (payload), 15 bytes. Inside, `0a 0d` is field 1
+(`upsert_devices`), 13 bytes: `08 01` device_id=1, `10 0b` unit_id=11, `18 01`
+interface=IF_RS485_1, `20 01` enabled=true, `28 80 4b` baud=9600, `30 01` parity=PAR_NONE.
+Every byte accounted for.
+
+Then the point, and reading it back:
+
+```
+{ "payload": { "upsert_points": { "point_id": 101, "device_ref": 1,
+                                  "reg_type": "REG_HOLDING", "data_type": "DT_U16",
+                                  "scale": 1, "writable": true,
+                                  "poll_class": "POLL_NORMAL", "name": "test-point" } } }
+→ { "applied_ids": [101] }
+
+points modbus read
+→ { "values": { "point_id": 101, "quality": "Q_FAULT", "src_ts_ms": 63325650, "seq_no": 1 } }
+
+points modbus write point_id=101 value=42
+→ { "point_id": 101, "accepted": true, "applied_value": 42 }
+
+points modbus sub
+→ { …, "payload": { "values": { "point_id": 101, "quality": "Q_FAULT", … } },
+       "is_notification": true }
+```
+
+`Q_FAULT` here is honest: the plumbing works end to end — the board accepted the config, polls
+the point, stamps it and publishes COV — but the slave at unit 11 is not answering holding
+register 0. `accepted: true` on the write is the device cache accepting it, not the bus
+confirming it; the authoritative confirmation would be the value reading back.
+
+Note that `address` does not appear in the point echo above: it was `0`, and proto3 does not
+transmit defaults.
+
+---
+
+## 8. Watching it from the board's side
+
+The same two views exist in the firmware. On the board's console:
+
+```
+param_set 710 2        # 0 off, 1 JSON, 2 JSON + full hex; effective within ~5 s
+```
+
+Both ends then print the same packet from their own vantage point, which is the only way to
+settle "the board never got it" against "the board ignored it".
+
+---
+
+## Related
+
+* [`../proto/`](../proto) — the contract, copied from `control-engine-docs/Contracts/proto-contracts`
+* [`../scripts/gen-proto-tables.py`](../scripts/gen-proto-tables.py) — generates the schema
+  tables for this tool and for the firmware
+* `ACB-M/components/app_zenoh/zenoh_trace.c` — the board-side tracer
+* `ACB-M/docs/Zenoh-Module/` — the transport: two sessions, peer capacity, bring-up
