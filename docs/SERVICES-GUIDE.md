@@ -914,6 +914,40 @@ Everything below assumes `EP` and `PW` from §12 and a `login` first. Point and 
 ### List what a board has
 
 ```bash
+printf "login $PW\ndevices\nquit\n" | ./build/q_zenoh_testapp --endpoint "$EP"
+```
+
+```
+  modbus
+    device 100154 unit 11   RS485_1    38400 NONE        enabled
+      point 100155   HOLDING:42000 U16  w    modbusPoint
+    device 100157 unit 1    RS485_1    38400 NONE        enabled
+      point 100158   HOLDING:40001 U16  w    modbusPoint
+  bacnet
+    device 1      MS/TP mac 4                            enabled
+      point 306      BO:6               ro   relay6
+      point 304      BI:4               ro   input4
+  lora
+    device 100151 dev_addr 1824547665                    enabled
+      point 100152   TEMPERATURE        ro   edgeLoraInput
+```
+
+`devices` reads all three config planes and groups every point under the device that owns it,
+each protocol in its own terms — a Modbus point by register, a BACnet point by object, a LoRa
+point by field. `w`/`ro` is whether you may write it.
+
+**The board is the only authority on this.** Its device and point configuration lives in RAM: a
+reboot clears it and the host re-syncs on connect, so what a board holds is not what you
+provisioned earlier — it is whatever the last sync put there. After any restart, including the
+one caused by opening the console, `devices` is how you find out what is actually there.
+
+Two devices with the same physical address — two `mac 4` entries, or two Modbus devices on the
+same `unit_id` — are accepted by the board and are usually a mistake: they double the traffic to
+one device. `devices` shows them plainly next to each other, which is the point of grouping.
+
+The per-plane form is still there when you want the raw reply rather than the summary:
+
+```bash
 printf "login $PW\nconfig modbus read\nquit\n" | ./build/q_zenoh_testapp --endpoint "$EP"
 ```
 

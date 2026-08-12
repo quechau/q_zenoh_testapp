@@ -55,6 +55,7 @@ static void usage(void)
 "  logout                  system.auth with an empty payload\n"
 "  sub <keyexpr> [secs]    subscribe and decode what arrives\n"
 "  pub <keyexpr> <text>    publish a raw payload\n"
+"  devices                           every device and its points, all three protocols\n"
 "  points <proto> read [ids...]      read point values (no ids = all)\n"
 "  points <proto> write field=value  write one point, e.g. point_id=101 value=42\n"
 "  points <proto> sub [secs]         subscribe to the COV notify stream\n"
@@ -281,6 +282,11 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         if (need_session(ctx) != 0) return -1;
         if (ctx->board[0] == '\0') qz_discover(ctx, 4);
         return qz_request(ctx, argv[1], parse_op(argc > 2 ? argv[2] : NULL), NULL, 0, 10);
+    }
+    if (strcmp(cmd, "devices") == 0) {
+        if (need_session(ctx) != 0) return -1;
+        if (ctx->board[0] == '\0') qz_discover(ctx, 4);
+        return qz_inventory(ctx);
     }
     if (strcmp(cmd, "boardinfo") == 0) {
         if (need_session(ctx) != 0) return -1;

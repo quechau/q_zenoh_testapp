@@ -316,8 +316,11 @@ static void on_ack(z_loaned_sample_t *sample, void *arg)
     z_drop(z_move(slice));
 }
 
-int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
-               const uint8_t *payload, size_t payload_len, unsigned timeout_s)
+/* Shared body. `quiet` suppresses the per-packet dump and `reply_out` receives the reply's
+ * payload — both exist so a command can read several services and render one view from them. */
+static int qz_request_impl(qz_ctx_t *ctx, const char *service, qz_op_t op,
+                           const uint8_t *payload, size_t payload_len, unsigned timeout_s,
+                           bool quiet, uint8_t *reply_out, size_t reply_cap, size_t *reply_len)
 {
     if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
     if (ctx->board[0] == '\0') { qz_log("ERR", "no board selected — run `discover` or `use <id>`"); return -1; }
@@ -375,8 +378,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     /* tx_ going out, rx_ coming back, cov_ for a notification nobody asked for. The NUMBER is
      * the same at both ends of one exchange — this tool's tx_41 is the board's rx_41 — so
      * grepping the number finds both halves; only the prefix says which half. */
-    qz_log("REQ", "%s  %s  %dB", req_key, qz_op_name(op), blen);
-    qz_packet_dump(body, (size_t)blen, false, "              ");
+    if (!quiet) {
+        qz_log("REQ", "%s  %s  %dB", req_key, qz_op_name(op), blen);
+        qz_packet_dump(body, (size_t)blen, false, "              ");
+    }
 
     z_view_keyexpr_t req_ke;
     z_view_keyexpr_from_str(&req_ke, req_key);
@@ -406,10 +411,19 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
     }
+    if (!quiet)
     qz_log("RES", "%s  %s  %zuB  round trip %llu ms",
            st.key[0] ? st.key : ack_key, qz_op_name(op), st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
-    qz_packet_dump(st.reply, st.reply_len, true, "              ");
+    if (!quiet) qz_packet_dump(st.reply, st.reply_len, true, "              ");
+
+    if (reply_out != NULL && reply_len != NULL) {
+        const uint8_t *pl = NULL;
+        size_t n = qz_field_bytes(st.reply, st.reply_len, 6, &pl);   /* response payload */
+        if (n > reply_cap) n = reply_cap;
+        if (n > 0) memcpy(reply_out, pl, n);
+        *reply_len = n;
+    }
 
     /* Field 7 of a ResponseEnvelope is an ErrorInfo message, not a number. Printing its two
      * raw bytes said nothing; decoding it turns "<2 B> 08 04" into ERROR_PERMISSION. */
@@ -422,6 +436,21 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
         return -(int)code;
     }
     return 0;
+}
+
+int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
+               const uint8_t *payload, size_t payload_len, unsigned timeout_s)
+{
+    return qz_request_impl(ctx, service, op, payload, payload_len, timeout_s,
+                           false, NULL, 0, NULL);
+}
+
+int qz_request_quiet(qz_ctx_t *ctx, const char *service, qz_op_t op,
+                     const uint8_t *payload, size_t payload_len, unsigned timeout_s,
+                     uint8_t *reply_out, size_t reply_cap, size_t *reply_len)
+{
+    return qz_request_impl(ctx, service, op, payload, payload_len, timeout_s,
+                           true, reply_out, reply_cap, reply_len);
 }
 
 /* --------------------------------------------------------------------- login */

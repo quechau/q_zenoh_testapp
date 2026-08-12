@@ -143,6 +143,19 @@ int  qz_login(qz_ctx_t *ctx, const char *password);
 int  qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                 const uint8_t *payload, size_t payload_len, unsigned timeout_s);
 
+/** As qz_request, but hands the reply's PAYLOAD back and can keep the packet dump quiet.
+ *  A command that reads three services to render one view wants the data, not three dumps. */
+int  qz_request_quiet(qz_ctx_t *ctx, const char *service, qz_op_t op,
+                      const uint8_t *payload, size_t payload_len, unsigned timeout_s,
+                      uint8_t *reply_out, size_t reply_cap, size_t *reply_len);
+
+/* ----------------------------------------------------------- inventory.c */
+
+/** Prints every device and its points, across all three config planes.
+ *  The board is the only authority on this — its config lives in RAM, so after any restart
+ *  what it holds is the only truth about what it holds. */
+int qz_inventory(qz_ctx_t *ctx);
+
 /* ---------------------------------------------------------------- repl.c */
 
 int qz_repl(qz_ctx_t *ctx);
