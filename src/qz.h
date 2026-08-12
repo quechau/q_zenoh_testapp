@@ -45,6 +45,9 @@ typedef struct {
     z_owned_session_t session;
     bool              session_open;
     bool              logged_in;
+    /* The contract's transaction id, handed out +1 per request. Random start so a restart does
+     * not replay the numbers the previous run used. */
+    uint32_t          seq_next;
 
     /* discovery */
     qz_board_t boards[QZ_MAX_BOARDS];
@@ -79,6 +82,7 @@ int      qz_cert_cn(const char *pem_path, char *out, size_t out_len);
 typedef enum {
     QZ_OP_UNKNOWN = 0, QZ_OP_READ = 1, QZ_OP_WRITE = 2, QZ_OP_VALIDATE = 3,
     QZ_OP_SUBSCRIBE = 4, QZ_OP_EXECUTE = 5, QZ_OP_DISCOVER = 6, QZ_OP_PING = 7,
+    QZ_OP_RESET = 8,          /* the contract's last operation; was missing here */
 } qz_op_t;
 
 /** Builds a RequestEnvelope. Returns the number of bytes written, or -1. */
@@ -96,6 +100,9 @@ void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char
 
 /** Renders an ErrorInfo and names its code. */
 const char *qz_error_name(uint64_t code);
+
+/** "READ", "WRITE", … for log lines that have to be readable when calls interleave. */
+const char *qz_op_name(qz_op_t op);
 
 /** Copies out a length-delimited field. Returns its length, or 0 when absent. */
 /* build.c — payloads assembled from `field=value` using the generated contract schema, so

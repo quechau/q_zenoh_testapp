@@ -259,7 +259,8 @@ int qz_publish(qz_ctx_t *ctx, const char *keyexpr, const char *payload)
 /* ------------------------------------------------------------ request/reply */
 
 typedef struct {
-    uint32_t seq;
+    uint32_t    seq;
+    const char *service;      /* what this exchange is for; checked on the way back */
     bool     got;
     uint64_t sent_ms;
     uint8_t  reply[2048];
@@ -274,15 +275,27 @@ static void on_ack(z_loaned_sample_t *sample, void *arg)
     const uint8_t *d = z_slice_data(z_loan(slice));
     size_t n = z_slice_len(z_loan(slice));
 
-    /* Only accept an ack that echoes OUR seq. The ack key already carries our client_id, but
-     * a stale reply to an earlier request would otherwise be reported as this one's. */
+    /* An ack is ours only if it echoes our seq AND names the service we asked. The key already
+     * pins the board and our client_id, so those cannot cross; seq pins WHICH request, and
+     * service_id catches the case seq alone cannot — a reply to a different service that
+     * happens to carry the same number. Anything else is somebody else's answer and is left
+     * alone rather than reported as this one's. */
     uint64_t seq = 0;
-    if (qz_field_varint(d, n, 4, &seq) && (uint32_t)seq == st->seq) {
-        if (n > sizeof(st->reply)) n = sizeof(st->reply);
-        memcpy(st->reply, d, n);
-        st->reply_len = n;
-        st->got = true;
+    if (!qz_field_varint(d, n, 4, &seq) || (uint32_t)seq != st->seq) { z_drop(z_move(slice)); return; }
+
+    const uint8_t *svc = NULL;
+    size_t svc_len = qz_field_bytes(d, n, 2, &svc);
+    if (st->service != NULL && svc != NULL &&
+        (svc_len != strlen(st->service) || memcmp(svc, st->service, svc_len) != 0)) {
+        qz_log("ACK", "ignored: seq %u came back as '%.*s', not %s",
+               (unsigned)seq, (int)svc_len, (const char *)svc, st->service);
+        z_drop(z_move(slice));
+        return;
     }
+    if (n > sizeof(st->reply)) n = sizeof(st->reply);
+    memcpy(st->reply, d, n);
+    st->reply_len = n;
+    st->got = true;
     z_drop(z_move(slice));
 }
 
@@ -292,8 +305,17 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
     if (ctx->board[0] == '\0') { qz_log("ERR", "no board selected — run `discover` or `use <id>`"); return -1; }
 
+    /* seq is the contract's transaction id: the request carries it and the reply echoes it, and
+     * it is the only thing that pairs the two. It used to be the low 16 bits of the millisecond
+     * clock, which REPEATS EVERY 65.5 SECONDS — so two exchanges a minute apart, or two clients
+     * started together, could carry the same number and each accept the other's reply.
+     *
+     * Now it is a per-session counter, +1 per call, started from a random 32-bit value so that
+     * restarting this tool does not replay the numbers it used last time. */
     rpc_state_t st = {0};
-    st.seq = (uint32_t)(qz_now_ms() & 0xFFFF);
+    if (ctx->seq_next == 0) ctx->seq_next = (uint32_t)qz_now_ms() ^ (uint32_t)(uintptr_t)ctx;
+    st.seq = ctx->seq_next++;
+    st.service = service;
 
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
     snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s",
@@ -319,7 +341,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                              payload, payload_len);
     if (blen < 0) { z_drop(z_move(sub)); qz_log("ERR", "envelope too large"); return -1; }
 
-    qz_log("REQ", "%s  %dB  seq=%u", req_key, blen, st.seq);
+    qz_log("REQ", "%s %s  seq=%u  %dB", service, qz_op_name(op), st.seq, blen);
     qz_packet_dump(body, (size_t)blen, false, "              ");
 
     z_view_keyexpr_t req_ke;
@@ -346,7 +368,8 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
         qz_log("REQ", "no ack within %us on %s", timeout_s, ack_key);
         return -1;
     }
-    qz_log("ACK", "seq=%u  %zuB  round trip %llu ms", st.seq, st.reply_len,
+    qz_log("ACK", "%s %s  seq=%u  %zuB  round trip %llu ms", service, qz_op_name(op),
+           st.seq, st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
     qz_packet_dump(st.reply, st.reply_len, true, "              ");
 

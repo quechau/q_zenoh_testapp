@@ -128,3 +128,18 @@ size_t qz_field_bytes(const uint8_t *buf, size_t len, uint32_t field, const uint
     }
     return 0;
 }
+
+const char *qz_op_name(qz_op_t op)
+{
+    switch (op) {
+        case QZ_OP_READ:      return "READ";
+        case QZ_OP_WRITE:     return "WRITE";
+        case QZ_OP_VALIDATE:  return "VALIDATE";
+        case QZ_OP_SUBSCRIBE: return "SUBSCRIBE";
+        case QZ_OP_EXECUTE:   return "EXECUTE";
+        case QZ_OP_DISCOVER:  return "DISCOVER";
+        case QZ_OP_PING:      return "PING";
+        case QZ_OP_RESET:     return "RESET";
+        default:              return "OP?";
+    }
+}

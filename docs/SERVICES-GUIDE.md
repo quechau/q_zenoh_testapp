@@ -466,6 +466,92 @@ slave. `zenoh_modbus.c` already carries a comment about a late response landing 
 transaction and failing its address check; a mis-paired response being published as good rather
 than dropped would produce exactly this. Not investigated further here.
 
+
+---
+
+## 11. Telling concurrent calls apart
+
+### What pins what
+
+```
+rubix/<board>/svc/<service>/ack/<client_id>
+      ───┬───     ───┬───       ────┬────
+     which board  which API   which consumer      ← the key separates these three
+                                                    at the routing layer
+
+RequestEnvelope.seq  ──echoed──▶  ResponseEnvelope.seq
+                                                    ← this separates WHICH CALL
+```
+
+The key already keeps two boards, two services and two consumers apart — replies simply never
+reach the wrong subscriber. What the key does **not** separate is two calls from the same
+consumer to the same service. That is what `seq` is for: the request carries it, the board
+echoes it unchanged, and the pair is the transaction.
+
+So a reply is yours only when the seq matches **and** the `service_id` is the one you asked for.
+This tool checks both. The second check is not redundant: the key is subscribed per request, but
+a consumer that keeps one long-lived subscription across services can otherwise accept a reply
+that carries the right number from the wrong API.
+
+### `seq` is a counter, +1 per call
+
+Each request takes the next number, starting from a random 32-bit value so that restarting the
+tool does not replay the numbers the previous run used.
+
+```
+REQ  system.auth EXECUTE       seq=2711876008   74B
+ACK  system.auth EXECUTE       seq=2711876008   27B  round trip 51 ms
+REQ  modbus.points READ        seq=2711876009   44B
+ACK  modbus.points READ        seq=2711876009   27B  round trip 51 ms
+```
+
+It used to be the low 16 bits of the millisecond clock, which **repeats every 65.5 seconds** —
+two exchanges a minute apart could carry the same number, and two clients started together would
+collide immediately. That is exactly the multi-threaded, multi-consumer case where correlation
+matters most, so it was the wrong choice there.
+
+### `seq` and `seq_no` are different things
+
+Easy to confuse, and they answer different questions:
+
+| | where | means |
+|---|---|---|
+| `seq` | `RequestEnvelope` / `ResponseEnvelope` field 4 | the transaction id — which call this is |
+| `seq_no` | `PointValue` field 5 | a per-point counter that bumps whenever that point's value changes; the authority for last-writer-wins |
+
+A climbing `seq_no` on a point whose register cannot change is a signal, not noise — see §10.
+
+### Both ends print it
+
+The board's tracer puts the service and seq on its header line, so a request can be paired with
+the consumer's own log even when several are talking at once:
+
+```
+I (125849) ZTR: RX << modbus.points  seq=2711876009  44 bytes
+I (125855) ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/modbus.points/ack/ce-acf23c0d8637  seq=2711876009  27 bytes
+```
+
+### Should the transaction id go in the key instead?
+
+It could: `…/ack/<client_id>/<seq>` would let each caller subscribe to exactly its own reply and
+let zenoh do the matching, with no filtering in the consumer at all. With many calls in flight
+that is a real saving — today every in-flight request from one consumer to one service receives
+**every** reply on that key and discards the ones that are not its own.
+
+It is not free, and it is not this tool's decision to make:
+
+* it is a **contract change**. The board builds the ack key (`app_zenoh.c`), so firmware, the
+  Control Engine and every other consumer have to move together. A consumer subscribed to the
+  exact current key stops receiving anything.
+* it puts an unbounded, ever-changing token in the keyspace. Each request becomes a new key
+  expression to declare and route, where today one key per consumer per service is reused.
+* it does not remove the need for `seq` in the envelope — the contract still carries it, and a
+  reply still has to be checked, so the win is routing efficiency rather than correctness.
+
+The correctness problem is already solved by the field. If the fan-out cost shows up in
+measurement — many consumers, many concurrent calls — the key is where to fix it, and the change
+belongs in the contract rather than in one tool.
+
 ---
 
 ## Related
