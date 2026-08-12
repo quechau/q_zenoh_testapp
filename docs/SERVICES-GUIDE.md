@@ -86,7 +86,7 @@ bare name is ambiguous; always qualify — `rubix.embedded.modbus.v1.PointWrite`
                                         2 service_id    5 encoding  8 is_notification
                                         3 op            6 payload   ← note: 6
                                    │
-  ← rubix/<board>/svc/<service>/ack/<client_id>
+  ← rubix/<board>/svc/<service>/res/<client_id>
 ```
 
 **The envelopes are not symmetric.** A request carries its payload in field **8**; a response in
@@ -558,7 +558,7 @@ correctly configured port, an unreachable device, and a consumer with no way to 
 ### What pins what
 
 ```
-rubix/<board>/svc/<service>/ack/<client_id>/<seq>
+rubix/<board>/svc/<service>/res/<client_id>/<seq>
       ───┬───     ───┬───       ────┬────    ─┬─
      which board  which API   which consumer  which call
 ```
@@ -574,7 +574,7 @@ envelope is the contract.** A consumer that skips the check because the key alre
 trusting a routing hint with correctness.
 
 **Subscribe with a trailing `**`.** It matches any number of chunks including zero, so
-`rubix/*/svc/*/ack/<client_id>/**` matches boards that append the id and boards that do not —
+`rubix/*/svc/*/res/<client_id>/**` matches boards that append the id and boards that do not —
 which is what makes the two ends upgradable in either order. An exact key without it matches
 neither shape once the other ships, and the failure is silent: no error, no log, no replies.
 
@@ -590,9 +590,9 @@ tool does not replay the numbers the previous run used.
 
 ```
 REQ  system.auth EXECUTE       seq=2711876008   74B
-ACK  system.auth EXECUTE       seq=2711876008   27B  round trip 51 ms
+RES  system.auth EXECUTE       seq=2711876008   27B  round trip 51 ms
 REQ  modbus.points READ        seq=2711876009   44B
-ACK  modbus.points READ        seq=2711876009   27B  round trip 51 ms
+RES  modbus.points READ        seq=2711876009   27B  round trip 51 ms
 ```
 
 It used to be the low 16 bits of the millisecond clock, which **repeats every 65.5 seconds** —
@@ -621,21 +621,21 @@ consumer                                              board
 
 REQ  system.auth EXECUTE      seq=1056147149   74B
                                     I (53968) ZTR: RX << system.auth  seq=1056147149  74 bytes
-                                    I (53973) ZTR: TX >> …/system.auth/ack/ce-acf23c0d8637
+                                    I (53973) ZTR: TX >> …/system.auth/res/ce-acf23c0d8637
                                                          seq=1056147149  27 bytes
-ACK  system.auth EXECUTE      seq=1056147149   27B  round trip 352 ms
+RES  system.auth EXECUTE      seq=1056147149   27B  round trip 352 ms
 
 REQ  modbus.points READ       seq=1056147150   48B
                                     I (54399) ZTR: RX << modbus.points  seq=1056147150  48 bytes
-                                    I (54404) ZTR: TX >> …/modbus.points/ack/ce-acf23c0d8637
+                                    I (54404) ZTR: TX >> …/modbus.points/res/ce-acf23c0d8637
                                                          seq=1056147150  27 bytes
-ACK  modbus.points READ       seq=1056147150   27B  round trip 150 ms
+RES  modbus.points READ       seq=1056147150   27B  round trip 150 ms
 ```
 
 Byte counts match on both sides of every line, which is the cheap check that nothing is being
 altered in transit. Note also what the timings say: the board turns a request around in about
 **5 ms** (53968 → 53973), while the consumer measures 50–350 ms. The difference is this tool's
-own work — it declares the ack subscriber per request and settles before publishing — not the
+own work — it declares the reply subscriber per request and settles before publishing — not the
 board being slow. Measure the board with the board's clock.
 
 
@@ -648,7 +648,7 @@ It is, and the overlap is not small. Taking the 56-byte `bacnet.points` write ab
 12 0d 62 61 63 6e 65 74 2e 70 6f 69 6e 74 73 service_id     15 B   ← also in the key
 18 02                                        op              2 B
 20 b6 9b 8b db 01                            seq             6 B   ← also in the key
-2a 0f 63 65 2d 61 63 66 32 33 63 30 64 38 36 client_id      17 B   ← also in the ack key
+2a 0f 63 65 2d 61 63 66 32 33 63 30 64 38 36 client_id      17 B   ← also in the reply key
 42 0c 08 b2 02 11 00 …                       payload        14 B
 ```
 
@@ -687,12 +687,12 @@ together — a consumer left on an exact old key receives nothing and says nothi
 
 | | |
 |---|---|
-| `ACB-M app_zenoh.c` | publishes `…/ack/<client_id>/<seq>` |
-| `ce-edgelink zenoh_transport.cpp` | subscribes `rubix/*/svc/*/ack/<cid>/**` |
+| `ACB-M app_zenoh.c` | publishes `…/res/<client_id>/<seq>` |
+| `ce-edgelink zenoh_transport.cpp` | subscribes `rubix/*/svc/*/res/<cid>/**` |
 | `ce-edgelink zenoh_peer_probe.cpp` | same |
 | `ce-mobile keysV1.ts` | `ackAll` gains `/**`; `ack(...)` takes an optional seq; `parseAckKey` returns it |
 | `ACB-M poc/zenoh-e2e/zprobe.py` | subscribes with `/**` |
-| this tool | subscribes to the exact `…/ack/<cid>/<seq>/**` — one call, one key |
+| this tool | subscribes to the exact `…/res/<cid>/<seq>/**` — one call, one key |
 | `keyspace.md` | the peer-bus keys were not in the normative grammar at all; now they are |
 
 The consumers went first, all tolerant, then the board. In that order nothing is broken at any
@@ -854,7 +854,7 @@ grep -E "(REQ|ACK) " /tmp/client.txt
 
 ```
 I ZTR: RX << rubix/acbm-1cdbd4abbc7c/svc/system.auth/req                             seq=2178265798   74 bytes
-I ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/system.auth/ack/ce-acf23c0d8637/2178265798  seq=2178265798   27 bytes
+I ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/system.auth/res/ce-acf23c0d8637/2178265798  seq=2178265798   27 bytes
 ```
 
 Leave the board quiet again with `param_set 710 0` — the level lives in NVS and survives reboots.

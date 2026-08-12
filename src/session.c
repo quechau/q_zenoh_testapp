@@ -299,7 +299,7 @@ static void on_ack(z_loaned_sample_t *sample, void *arg)
     size_t svc_len = qz_field_bytes(d, n, 2, &svc);
     if (st->service != NULL && svc != NULL &&
         (svc_len != strlen(st->service) || memcmp(svc, st->service, svc_len) != 0)) {
-        qz_log("ACK", "ignored: seq %u came back as '%.*s', not %s",
+        qz_log("RES", "ignored: seq %u came back as '%.*s', not %s",
                (unsigned)seq, (int)svc_len, (const char *)svc, st->service);
         z_drop(z_move(slice));
         return;
@@ -350,7 +350,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
      * mystery. The seq and service_id checks in on_ack stay regardless: the key is an
      * optimisation, the envelope is the contract. */
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
-    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s/%u/**",
+    /* The direction chunk is a wildcard so this matches a device publishing `res` and one still
+     * publishing `ack`. It cannot catch anything else: the chunks after it are our own client
+     * id and this call's seq, which no other key on this service carries there. */
+    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/*/%s/%u/**",
              ctx->board, service, ctx->client_id, st.seq);
     /* The transaction id rides the request key too, so both directions name the exchange in
      * the topic and a log line is readable without decoding the envelope. The board subscribes
@@ -403,14 +406,14 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
         /* Worth knowing: the board drops requests silently when its dispatch queue is full
          * (zero-timeout xQueueSend into a depth-8 queue), so a timeout does not necessarily
          * mean the request never arrived. */
-        qz_log("REQ", "no ack within %us on %s", timeout_s, ack_key);
+        qz_log("REQ", "no reply within %us on %s", timeout_s, ack_key);
         qz_log("HINT", "that key carries the transaction id. A board built before the id was "
-                       "added replies on rubix/%s/svc/%s/ack/%s with no trailing chunk, which "
-                       "this subscription cannot match — flash it, or subscribe .../ack/%s/**",
+                       "added replies on rubix/%s/svc/%s/res/%s with no trailing chunk, which "
+                       "this subscription cannot match — flash it, or subscribe .../*/%s/**",
                ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
     }
-    qz_log("ACK", "%s  %s  rx_%u  %zuB  round trip %llu ms",
+    qz_log("RES", "%s  %s  rx_%u  %zuB  round trip %llu ms",
            st.key[0] ? st.key : ack_key, qz_op_name(op), st.seq, st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
     qz_packet_dump(st.reply, st.reply_len, true, "              ");
@@ -422,7 +425,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     uint64_t code = 0;
     if (elen > 0) (void)qz_field_varint(errbuf, elen, 1, &code);
     if (code != 0) {
-        qz_log("ACK", "FAILED — %s (code %llu)", qz_error_name(code), (unsigned long long)code);
+        qz_log("RES", "FAILED — %s (code %llu)", qz_error_name(code), (unsigned long long)code);
         return -(int)code;
     }
     return 0;
