@@ -638,6 +638,48 @@ altered in transit. Note also what the timings say: the board turns a request ar
 own work — it declares the ack subscriber per request and settles before publishing — not the
 board being slow. Measure the board with the board's clock.
 
+
+### Is the key not duplicating the envelope?
+
+It is, and the overlap is not small. Taking the 56-byte `bacnet.points` write above:
+
+```
+08 01                                        wire_version    2 B
+12 0d 62 61 63 6e 65 74 2e 70 6f 69 6e 74 73 service_id     15 B   ← also in the key
+18 02                                        op              2 B
+20 b6 9b 8b db 01                            seq             6 B   ← also in the key
+2a 0f 63 65 2d 61 63 66 32 33 63 30 64 38 36 client_id      17 B   ← also in the ack key
+42 0c 08 b2 02 11 00 …                       payload        14 B
+```
+
+`service_id` and `seq` together are **21 of 56 bytes**, and 21 of the 34-byte reply — 62 % of an
+ack is fields its key already carries. So the instinct that something is redundant is right
+about the bytes. It is wrong about which copy to delete.
+
+**The envelope is the one that has to stand alone**, for reasons that are already load-bearing
+in this codebase:
+
+* The Control Engine matches a reply to its request with `scanSeq(bytes…)` — it reads `seq` out
+  of the **envelope**, never out of the key. Take `seq` out of the envelope and correlation stops
+  working, on the transport we just spent this whole change improving.
+* The same envelopes travel over the **WebSocket transport**, where there is no zenoh key at all.
+  `websocket_transport.cpp` *synthesises* a key string from the board and service carried in its
+  own framing, precisely so the layers above cannot tell the two apart. An envelope that needed
+  its key to be complete would not survive that path.
+* An envelope gets logged, stored and forwarded on its own. A packet dump, an evidence file, a
+  bug report — none of them carry the key unless someone remembered to write it down.
+
+And the key copy earns its place too: it is what lets a caller subscribe to exactly its own
+reply, and what makes a log line readable without a decoder.
+
+So the rule stated in §11 is the whole answer: **the key is an optimisation, the envelope is the
+contract.** They agree because one of them is routing metadata and the other is the message, and
+a consumer that trusts the key instead of checking the envelope has swapped which is which.
+
+The one field that looks most redundant is the least: `client_id` in the request is the caller's
+*claim*, and the session certificate's CN is the *fact*. ADR-016 exists to compare them. Remove
+the claim and there is nothing left to check against.
+
 ### What the change touched
 
 Moving the id into the key is a contract change, so every producer and consumer had to move
