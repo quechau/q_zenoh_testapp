@@ -39,11 +39,15 @@ three things that actually cause it — instead of describing how to interpret o
 version printed "a zero error code above means unlocked" whatever came back, so a refused
 login looked exactly like a successful one.
 
-The JSON renderer has no generated code and no schema at run time. Varints print as numbers,
-printable byte strings as strings, and anything else is re-parsed as a nested message and
-printed as an object if it parses cleanly to the last byte. Field *names* come from small
-tables for the messages worth naming; a field with no entry keeps its number, so the output
-never invents a label it cannot justify.
+**The schema comes from the contract, not from guesswork.** `scripts/gen-proto-tables.py`
+turns `proto/` into C lookup tables at configure time, so fields carry their declared names
+and types: enums print as `"OP_EXECUTE"`, `bool` as `true`, `double` as a number, repeated
+fields as JSON arrays. Inference was wrong in ways that looked right — a hand-written table
+labelled `SupportedService.service_id` as `id` and left `role` as a bare `3` for weeks.
+Payloads are routed by (service, op, direction), and the ones that are not protobuf are named
+rather than forced through a decoder: `system.auth` carries a bare 32-byte proof, and an empty
+payload is a logout. Where the contract does not say, the renderer falls back to inference and
+keeps field numbers, so it never invents a label it cannot justify.
 
 ## Build
 
@@ -174,8 +178,6 @@ src/mdns.c      finding boards: mDNS for the name, TCP sweep for the address
 src/json.c       protobuf rendered as readable JSON, inferred rather than generated
 src/logfilter.c keeps zenoh-pico's chatter out of the way unless --debug
 src/util.c      hashing, base64, certificate CN
-proto/          envelope.proto, for reference
-scripts/        bootstrap.sh
 ```
 
 ## Related
@@ -183,3 +185,5 @@ scripts/        bootstrap.sh
 * `ACB-M/docs/Zenoh-Module/` — the firmware side, including the two-session design, the
   manual test walkthrough and the peer capacity measurements
 * `ACB-M/poc/zenoh-e2e/` — the Python equivalents of these tests
+* `ACB-M/components/app_zenoh/zenoh_trace.c` — the same two views on the board itself, from
+  the same generated tables (`param_set 710 2`)

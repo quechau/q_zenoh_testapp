@@ -1,0 +1,114 @@
+// service_boardinfo.proto — `system.boardinfo` READ schema.
+//
+// Carried inside `RequestEnvelope.payload` / `ResponseEnvelope.payload`.
+// See Embedded-Devices/docs/espidf-port/phase-03-board-info-proto-nanopb-contract.md.
+
+syntax = "proto3";
+
+package rubix.embedded.boardinfo.v1;
+
+// ---------------------------------------------------------------------------
+// Read request — empty in v1; reserved for future filters.
+// ---------------------------------------------------------------------------
+
+message GetBoardInfoRequest {
+  // Optional bitfield to skip expensive sections. Default 0 ⇒ include all.
+  // Bit positions reserved:
+  //   bit 0 ⇒ omit supported_services
+  //   bit 1 ⇒ omit supported_transports
+  //   bit 2 ⇒ omit supported_interfaces
+  uint32 omit_mask = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Read response — the full snapshot.
+// ---------------------------------------------------------------------------
+
+message GetBoardInfoResponse {
+  BoardInfo info = 1;
+}
+
+message BoardInfo {
+  // Stable identity ----------------------------------------------------------
+  string board_name       = 1;     // human label, e.g. "ESP32 DevKit"
+  string board_type       = 2;     // family, e.g. "esp32_devkit"
+  string chip_type        = 3;     // "esp32", "esp32s3", …
+  string hardware_version = 4;     // "rev1", "rev2.1"
+
+  // Software identity --------------------------------------------------------
+  string software_version = 5;     // SemVer of the framework build
+  string firmware_version = 6;     // SemVer of the application image
+  string protocol_version = 7;     // wire/contract semver, e.g. "1.0.0"
+  string build_time       = 8;     // RFC-3339 UTC
+
+  // Capability discovery -----------------------------------------------------
+  repeated SupportedService   supported_services   = 9;
+  repeated SupportedTransport supported_transports = 10;
+  repeated SupportedInterface supported_interfaces = 11;
+}
+
+message SupportedService {
+  string    service_id       = 1;
+  string    version          = 2;
+  Stability stability        = 3;
+  Category  category         = 4;
+  uint32    capability_hash  = 5;
+  bool      is_simulated     = 6;
+  bool      swappable        = 7;
+}
+
+enum Stability {
+  STAB_UNKNOWN      = 0;
+  STAB_STABLE       = 1;
+  STAB_BETA         = 2;
+  STAB_EXPERIMENTAL = 3;
+  STAB_INTERNAL     = 4;
+  STAB_DEPRECATED   = 5;
+}
+
+enum Category {
+  CAT_UNKNOWN     = 0;
+  CAT_SYSTEM      = 1;
+  CAT_DRIVER      = 2;
+  CAT_APPLICATION = 3;
+  CAT_MANAGER     = 4;
+  CAT_HAL         = 5;
+}
+
+message SupportedTransport {
+  string         transport_id  = 1;   // "transport.zenoh", "transport.uart_debug"
+  string         version       = 2;
+  TransportRole  role          = 3;
+  bool           healthy       = 4;
+}
+
+enum TransportRole {
+  TR_UNKNOWN = 0;
+  TR_CLIENT  = 1;
+  TR_PEER    = 2;
+  TR_SERVER  = 3;
+  TR_DEBUG   = 4;
+}
+
+message SupportedInterface {
+  InterfaceId id      = 1;
+  bool        present = 2;          // false ⇒ board declares it but unbacked
+  string      backing = 3;          // free-form, e.g. "esp32_uart0"
+}
+
+// Append-only. Never renumber.
+enum InterfaceId {
+  IFACE_UNKNOWN = 0;
+  IFACE_NVS     = 1;
+  IFACE_TIME    = 2;
+  IFACE_LOGGER  = 3;
+  IFACE_TIMER   = 4;
+  IFACE_UART    = 5;
+  IFACE_GPIO    = 6;
+  IFACE_WIFI    = 7;
+  IFACE_ETH     = 8;
+  IFACE_SPI     = 9;
+  IFACE_RTC     = 10;
+  IFACE_FS      = 11;
+  IFACE_I2C     = 12;
+}

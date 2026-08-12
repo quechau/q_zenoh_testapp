@@ -92,8 +92,7 @@ int qz_req_encode(uint8_t *buf, size_t buf_len, const char *service_id, qz_op_t 
  *  types; the rest keep their field number, so the output never invents a label. */
 
 /** Prints a packet twice: the bytes exactly as sent, then the same thing as JSON. */
-void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *service,
-                    const char *indent);
+void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *indent);
 
 /** Renders an ErrorInfo and names its code. */
 const char *qz_error_name(uint64_t code);

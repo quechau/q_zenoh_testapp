@@ -1,0 +1,128 @@
+// modbus_config.proto — `modbus.config` READ/WRITE schema (contracts doc 05 §B4.3).
+//
+// Carried inside RequestEnvelope.payload / ResponseEnvelope.payload.
+// READ  -> ModbusConfig (full middleware-owned snapshot on the device)
+// WRITE -> ModbusConfigDelta in, ConfigResult out (per-item atomic verdicts).
+
+syntax = "proto3";
+
+package rubix.embedded.modbus.v1;
+
+// ---------------------------------------------------------------------------
+// Definitions
+// ---------------------------------------------------------------------------
+
+enum ModbusInterface {
+  IF_UNSPECIFIED = 0;
+  IF_RS485_1     = 1;
+  IF_RS485_2     = 2;
+  IF_LORA        = 3;
+}
+
+// Serial parity for a device's RTU framing. Word length is fixed at 8 and stop
+// bits at 1 (Modbus RTU norm); only baud and parity vary in practice, so those
+// are the two knobs carried per device.
+enum Parity {
+  PAR_UNSPECIFIED = 0;  // treated as PAR_NONE by the device
+  PAR_NONE        = 1;
+  PAR_EVEN        = 2;
+  PAR_ODD         = 3;
+}
+
+enum RegisterType {
+  REG_UNSPECIFIED = 0;
+  REG_COIL        = 1;
+  REG_DISCRETE    = 2;
+  REG_INPUT       = 3;
+  REG_HOLDING     = 4;
+}
+
+enum DataType {
+  DT_UNSPECIFIED = 0;
+  DT_U16         = 1;
+  DT_I16         = 2;
+  DT_U32         = 3;
+  DT_I32         = 4;
+  DT_F32         = 5;
+  DT_BIT         = 6;
+}
+
+enum PollClass {
+  POLL_UNSPECIFIED = 0;
+  POLL_FAST        = 1;
+  POLL_NORMAL      = 2;
+  POLL_SLOW        = 3;
+}
+
+message ModbusDeviceDef {
+  uint32          device_id = 1;   // middleware-owned id (reserved range on device)
+  uint32          unit_id   = 2;   // Modbus slave address 1..247 (wiresheet-selectable)
+  ModbusInterface interface = 3;
+  bool            enabled   = 4;
+  // Per-device serial line rate. The device applies baud+parity to the port
+  // before each transaction with this slave (skipped when already current), so
+  // slaves at different baud can share one RS485 bus, time-multiplexed. 0 = keep
+  // the port's boot default (param 0x0250/0x0251).
+  uint32          baud      = 5;   // e.g. 9600, 19200, 38400, 57600, 115200
+  Parity          parity    = 6;
+}
+
+message ModbusPointDef {
+  uint32       point_id   = 1;
+  uint32       device_ref = 2;     // ModbusDeviceDef.device_id
+  RegisterType reg_type   = 3;
+  uint32       address    = 4;     // 0..65535
+  DataType     data_type  = 5;
+  float        scale      = 6;     // engineering = raw * scale (0 forbidden)
+  bool         writable   = 7;
+  PollClass    poll_class = 8;
+
+  // Operator-facing display name (the wiresheet component's name, e.g.
+  // "target-temp"). Host-owned and purely descriptive: the board never parses
+  // it — it stores the string and hands it back in the config READ snapshot so
+  // a consumer that is not the wiresheet (the phone) can label points the way
+  // the operator does. Empty is legal (older hosts); consumers must fall back
+  // to the point id. Bounded small (.options) because it rides the same
+  // 512 B delta / 1536 B snapshot caps as everything else.
+  string       name       = 9;
+}
+
+// ---------------------------------------------------------------------------
+// READ response — full snapshot of middleware-owned config on the device.
+// ---------------------------------------------------------------------------
+
+message ModbusConfig {
+  repeated ModbusDeviceDef devices = 1;   // bounded via .options
+  repeated ModbusPointDef  points  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// WRITE request/response — delta-only, per-item atomic (no replaceAll by design).
+// ---------------------------------------------------------------------------
+
+message ModbusConfigDelta {
+  repeated ModbusDeviceDef upsert_devices   = 1;
+  repeated ModbusPointDef  upsert_points    = 2;
+  repeated uint32          remove_device_ids = 3;
+  repeated uint32          remove_point_ids  = 4;
+}
+
+enum ConfigReject {
+  REJ_UNSPECIFIED = 0;
+  REJ_POOL_FULL   = 1;   // device point/device pool exhausted
+  REJ_IFACE_ROLE  = 2;   // interface param role is not modbus-master
+  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
+  REJ_DUPLICATE   = 4;   // duplicate unit id on interface / duplicate point id
+  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
+  REJ_INVALID     = 6;   // failed device-side field validation
+}
+
+message ConfigResultItem {
+  uint32       id     = 1;
+  ConfigReject reason = 2;
+}
+
+message ConfigResult {
+  repeated uint32           applied_ids = 1;
+  repeated ConfigResultItem rejected    = 2;
+}

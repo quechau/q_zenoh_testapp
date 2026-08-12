@@ -37,23 +37,56 @@ static bool is_hidden_zenoh_line(const char *line)
            (strstr(line, " INFO ::")  != NULL && strstr(line, " INFO ::")  < close);
 }
 
+static void emit(const char *s, size_t n)
+{
+    size_t off = 0;
+    while (off < n) {
+        ssize_t w = write(g_orig_stdout, s + off, n - off);
+        if (w <= 0) break;
+        off += (size_t)w;
+    }
+}
+
 static void *pump(void *arg)
 {
     int rfd = *(int *)arg;
-    FILE *in = fdopen(rfd, "r");
-    if (in == NULL) return NULL;
-    char line[4096];
-    while (fgets(line, sizeof(line), in) != NULL) {
-        if (!g_verbose && is_hidden_zenoh_line(line)) continue;
-        ssize_t n = (ssize_t)strlen(line);
-        ssize_t off = 0;
-        while (off < n) {
-            ssize_t w = write(g_orig_stdout, line + off, (size_t)(n - off));
-            if (w <= 0) break;
-            off += w;
+
+    /* Raw reads, not fgets. The filter works on whole lines, but the REPL prompt is written
+     * WITHOUT a trailing newline — and fgets blocks until it sees one, so the prompt never
+     * reached the terminal and the tool looked like it had hung after printing its banner.
+     *
+     * So: buffer until a newline for anything that could be a log line, and release an
+     * incomplete tail immediately when it cannot be one. Every line this tool and zenoh-pico
+     * emit starts with '[', so a partial line that does not is the prompt (or something else
+     * of ours) and is safe to pass straight through. */
+    char pending[8192];
+    size_t held = 0;
+    char chunk[4096];
+
+    for (;;) {
+        ssize_t got = read(rfd, chunk, sizeof(chunk));
+        if (got <= 0) break;
+
+        for (ssize_t i = 0; i < got; i++) {
+            if (held + 1 >= sizeof(pending)) {      /* absurdly long line: never grow forever */
+                emit(pending, held);
+                held = 0;
+            }
+            pending[held++] = chunk[i];
+            if (chunk[i] != '\n') continue;
+
+            pending[held] = '\0';
+            if (g_verbose || !is_hidden_zenoh_line(pending)) emit(pending, held);
+            held = 0;
+        }
+
+        if (held > 0 && pending[0] != '[') {        /* a prompt, not a half-written log line */
+            emit(pending, held);
+            held = 0;
         }
     }
-    fclose(in);
+    if (held > 0) emit(pending, held);
+    close(rfd);
     return NULL;
 }
 

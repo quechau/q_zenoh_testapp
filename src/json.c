@@ -1,96 +1,32 @@
-/** json.c — render a protobuf message as readable JSON, without a schema.
+/** json.c — print a packet as the bytes that went on the wire, and as readable JSON.
  *
- * The field-by-field dump in proto.c shows the wire truth; this shows what it *means*. Nested
- * payloads matter most: `system.boardinfo` answers with 141 bytes of nested protobuf, which as
- * a hex preview tells you nothing.
+ * The schema comes from the contract protos via scripts/gen-proto-tables.py, not from
+ * guesswork. That matters more than it sounds: inference is wrong in ways that look right.
+ * A `bytes` field holding printable ASCII prints as a string, a small enum prints as a bare
+ * number, and a `double` is indistinguishable from an eight-byte blob. With declared types
+ * the renderer knows, and where it does not know it says so by falling back to field numbers
+ * rather than inventing a label.
  *
- * There is no generated code here, so the renderer infers rather than knows:
- *   - varint fields print as numbers;
- *   - length-delimited fields print as strings when the bytes are printable, otherwise the
- *     renderer tries to parse them as a nested message and prints an object if that succeeds;
- *   - anything else prints as a hex string.
- *
- * Field NAMES come from a small table per message type, so the common answers read properly.
- * Fields with no entry keep their number ("7"), which keeps the output honest about what is
- * actually known rather than inventing labels.
+ * The payload is the interesting part and it is not self-describing: `RequestEnvelope.payload`
+ * is `bytes`. Its real type depends on the service id and operation in the *same* envelope, so
+ * both are read first and the payload is rendered as whatever the contract routes them to.
+ * Not every payload is protobuf — `system.auth` carries a bare 32-byte SHA-256 proof and an
+ * empty payload means logout — so those are named payload kinds rather than a decode that
+ * would quietly find nothing.
  */
 #include "qz.h"
+#include "proto_tables.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-typedef struct { uint32_t field; const char *name; } qz_name_t;
-
-/* The reply payload is a wrapper: GetBoardInfoResponse { BoardInfo info = 1; }. Naming the
- * top level correctly matters — applying BoardInfo's table one level too high labelled the
- * whole object "board_name", which reads like a decoded value and is not one. */
-static const qz_name_t BOARDINFO_RESPONSE[] = { {1, "info"}, {0, NULL} };
-
-/* rubix.embedded.v1.BoardInfo — proto/services/service_boardinfo.proto */
-static const qz_name_t BOARDINFO[] = {
-    {1, "board_name"}, {2, "board_type"}, {3, "chip_type"}, {4, "hardware_version"},
-    {5, "software_version"}, {6, "firmware_version"}, {7, "protocol_version"},
-    {8, "build_time"}, {9, "supported_services"}, {10, "supported_transports"},
-    {11, "supported_interfaces"}, {0, NULL}
-};
-/* The repeated entries inside BoardInfo. Both start with an id and a version, which is enough
- * to make the list readable. */
-static const qz_name_t SUPPORTED[] = {
-    {1, "id"}, {2, "version"}, {4, "healthy"}, {5, "capability_hash"},
-    {6, "is_simulated"}, {7, "swappable"}, {0, NULL}
-};
-
-/* rubix.embedded.v1.ErrorInfo — the field every failed reply carries and the one this tool
- * used to print as two raw bytes. */
-static const qz_name_t ERRORINFO[] = { {1, "code"}, {2, "message"}, {3, "detail"}, {0, NULL} };
-
-/** ErrorCode names, so a verdict reads as a reason rather than a number. */
-const char *qz_error_name(uint64_t code)
-{
-    switch (code) {
-        case 0: return "ERROR_OK";
-        case 1: return "ERROR_UNSUPPORTED";
-        case 2: return "ERROR_BAD_REQUEST";
-        case 3: return "ERROR_STATE";
-        case 4: return "ERROR_PERMISSION";
-        case 5: return "ERROR_TIMEOUT";
-        case 6: return "ERROR_HARDWARE";
-        case 7: return "ERROR_INTERNAL";
-        default: return "ERROR_?";
-    }
-}
-
-/* The envelopes themselves. Note they are NOT symmetric: a request carries its payload in
- * field 8, a response in field 6. */
-static const qz_name_t REQ_ENV[] = {
-    {1, "wire_version"}, {2, "service_id"}, {3, "op"}, {4, "seq"}, {5, "client_id"},
-    {6, "deadline_ms"}, {7, "encoding"}, {8, "payload"}, {0, NULL}
-};
-static const qz_name_t RSP_ENV[] = {
-    {1, "wire_version"}, {2, "service_id"}, {3, "op"}, {4, "seq"}, {5, "encoding"},
-    {6, "payload"}, {7, "error"}, {8, "is_notification"}, {0, NULL}
-};
-
-/* Which payload table to descend into, chosen by service id before rendering. */
-static const qz_name_t *g_payload_names = NULL;
-
-/** Which table applies one level down from `names` at `field`. */
-static const qz_name_t *descend(const qz_name_t *names, uint32_t field)
-{
-    if (names == REQ_ENV && field == 8) return g_payload_names;
-    if (names == RSP_ENV && field == 6) return g_payload_names;
-    if (names == RSP_ENV && field == 7) return ERRORINFO;
-    if (names == BOARDINFO_RESPONSE && field == 1) return BOARDINFO;
-    if (names == BOARDINFO && field >= 9 && field <= 11) return SUPPORTED;
-    return names;
-}
-
-static const char *lookup(const qz_name_t *tbl, uint32_t field)
-{
-    for (size_t i = 0; tbl != NULL && tbl[i].name != NULL; i++)
-        if (tbl[i].field == field) return tbl[i].name;
-    return NULL;
-}
+/* The payload's type is decided by the envelope around it, so it is resolved once per packet
+ * and consulted when the renderer reaches that one field. Printing is single-threaded. */
+static const qz_pmsg_t  *g_env       = NULL;   /* the envelope being rendered */
+static uint32_t          g_pl_field  = 0;      /* its payload field number: 8 req, 6 rsp */
+static qz_payload_kind_t g_pl_kind   = QZ_PL_UNKNOWN;
+static const qz_pmsg_t  *g_pl_msg    = NULL;
 
 static bool read_varint(const uint8_t *b, size_t len, size_t *i, uint64_t *out)
 {
@@ -139,118 +75,315 @@ static bool printable(const uint8_t *b, size_t len)
     return true;
 }
 
-static void put_json_string(const uint8_t *b, size_t len)
+static void put_string(const uint8_t *b, size_t len)
 {
     putchar('"');
     for (size_t i = 0; i < len; i++) {
         char c = (char)b[i];
         if (c == '"' || c == '\\') { putchar('\\'); putchar(c); }
-        else putchar(c);
+        else if (b[i] >= 0x20 && b[i] <= 0x7E) putchar(c);
+        else printf("\\u%04x", (unsigned)b[i]);
     }
     putchar('"');
 }
 
-static void render(const uint8_t *b, size_t len, const qz_name_t *names, int depth,
-                   const char *indent);
-
-/** Prints one field's value. `names` applies to a nested message, if this turns out to be one. */
-static void render_value(uint32_t field, uint32_t wt, const uint8_t *b, size_t len,
-                         const qz_name_t *names, int depth, const char *indent)
+static void put_hex(const uint8_t *b, size_t len)
 {
-    (void)field;
-    if (wt == 2) {
-        if (printable(b, len)) { put_json_string(b, len); return; }
-        if (depth < 6 && looks_like_message(b, len)) {
-            printf("{\n");
-            render(b, len, names, depth + 1, indent);
-            printf("%*s}", (depth) * 2 + (int)strlen(indent), "");
-            return;
-        }
-        printf("\"");
-        for (size_t i = 0; i < len; i++) printf("%02x", b[i]);   /* all of it, never a preview */
-        printf("\"");
-        return;
-    }
-    printf("null");
+    putchar('"');
+    for (size_t i = 0; i < len; i++) printf("%02x", b[i]);   /* all of it, never a preview */
+    putchar('"');
 }
 
-static void render(const uint8_t *b, size_t len, const qz_name_t *names, int depth,
-                   const char *indent)
+/* One occurrence of one field, collected before anything is printed so that repeated fields
+ * can be emitted as JSON arrays instead of the same key over and over. */
+typedef struct { uint32_t field, wt; const uint8_t *p; size_t len; uint64_t v; } item_t;
+
+static void render_msg(const uint8_t *b, size_t len, const qz_pmsg_t *msg, int depth,
+                       const char *indent);
+
+static const qz_pfield_t *field_of(const qz_pmsg_t *msg, uint32_t number)
 {
+    if (msg == NULL) return NULL;
+    for (int i = 0; i < msg->nfields; i++)
+        if (msg->fields[i].number == number) return &msg->fields[i];
+    return NULL;
+}
+
+static void put_varint_as(const qz_pfield_t *f, uint64_t v)
+{
+    if (f == NULL) { printf("%llu", (unsigned long long)v); return; }
+    switch (f->type) {
+        case QZ_T_BOOL:
+            printf("%s", v ? "true" : "false");
+            return;
+        case QZ_T_SVARINT:
+            printf("%lld", (long long)((v >> 1) ^ (~(v & 1) + 1)));
+            return;
+        case QZ_T_ENUM: {
+            const char *lbl = qz_enum_label(f->ref, v);
+            if (lbl != NULL) printf("\"%s\"", lbl);        /* readable beats a bare number */
+            else printf("%llu", (unsigned long long)v);
+            return;
+        }
+        default:
+            printf("%llu", (unsigned long long)v);
+    }
+}
+
+/** The payload field, rendered as whatever the envelope's service and op route it to. */
+static void put_payload(const uint8_t *b, size_t len, int depth, const char *indent)
+{
+    switch (g_pl_kind) {
+        case QZ_PL_SHA256_PROOF:
+            /* Not protobuf: 32 raw bytes of sha256(nonce:client_id:sha256(password)). The key
+             * names here are this tool's, not the contract's — there is no message to take
+             * them from, and pretending otherwise would be the same mistake in reverse. */
+            printf("{ \"_kind\": \"sha256-proof\", \"proof\": ");
+            put_hex(b, len);
+            printf("%s }", len == 32 ? "" : ", \"_note\": \"expected 32 bytes\"");
+            return;
+        case QZ_PL_EMPTY:
+            if (len == 0) { printf("{}"); return; }
+            printf("{ \"_note\": \"contract says empty, bytes present\", \"_bytes\": ");
+            put_hex(b, len);
+            printf(" }");
+            return;
+        case QZ_PL_MSG:
+            if (len == 0) { printf("{}"); return; }
+            printf("{\n");
+            render_msg(b, len, g_pl_msg, depth + 1, indent);
+            printf("%s%*s}", indent, depth * 2, "");
+            return;
+        case QZ_PL_UNKNOWN:
+        default:
+            /* The contract does not say what this carries. Parse it rather than assert a
+             * shape, and label the fields by number so nothing is claimed that is not known. */
+            if (looks_like_message(b, len)) {
+                printf("{\n");
+                render_msg(b, len, NULL, depth + 1, indent);
+                printf("%s%*s}", indent, depth * 2, "");
+            } else if (printable(b, len)) put_string(b, len);
+            else put_hex(b, len);
+    }
+}
+
+/** One length-delimited value, using the declared type when there is one. */
+static void put_bytes_as(const qz_pfield_t *f, const qz_pmsg_t *owner, uint32_t number,
+                         const uint8_t *b, size_t len, int depth, const char *indent)
+{
+    if (owner != NULL && owner == g_env && number == g_pl_field) {
+        put_payload(b, len, depth, indent);
+        return;
+    }
+    if (f != NULL) {
+        switch (f->type) {
+            case QZ_T_STRING: put_string(b, len); return;
+            case QZ_T_BYTES:  put_hex(b, len);    return;
+            case QZ_T_MSG:
+                if (len == 0) { printf("{}"); return; }   /* an absent submessage, not a gap */
+                printf("{\n");
+                render_msg(b, len, (f->ref >= 0 && f->ref < qz_nmsgs) ? &qz_msgs[f->ref] : NULL,
+                           depth + 1, indent);
+                printf("%s%*s}", indent, depth * 2, "");
+                return;
+            default: break;   /* a packed repeated scalar — handled by the caller */
+        }
+    }
+    /* No declared type: infer, and stay honest about it. */
+    if (printable(b, len)) { put_string(b, len); return; }
+    if (depth < 8 && looks_like_message(b, len)) {
+        printf("{\n");
+        render_msg(b, len, NULL, depth + 1, indent);
+        printf("%s%*s}", indent, depth * 2, "");
+        return;
+    }
+    put_hex(b, len);
+}
+
+/** proto3 packs repeated scalars into one length-delimited field; unpack it into an array. */
+static void put_packed(const qz_pfield_t *f, const uint8_t *b, size_t len)
+{
+    printf("[");
     size_t i = 0;
     bool first = true;
     while (i < len) {
+        if (!first) printf(", ");
+        first = false;
+        if (f->type == QZ_T_DOUBLE && i + 8 <= len) {
+            double d; memcpy(&d, b + i, 8); i += 8; printf("%g", d);
+        } else if ((f->type == QZ_T_FLOAT || f->type == QZ_T_FIXED32) && i + 4 <= len) {
+            float g; memcpy(&g, b + i, 4); i += 4; printf("%g", (double)g);
+        } else {
+            uint64_t v;
+            if (!read_varint(b, len, &i, &v)) break;
+            put_varint_as(f, v);
+        }
+    }
+    printf("]");
+}
+
+static void put_item(const item_t *it, const qz_pfield_t *f, const qz_pmsg_t *owner, int depth,
+                     const char *indent)
+{
+    if (it->wt == 0) { put_varint_as(f, it->v); return; }
+    if (it->wt == 1) {
+        if (f != NULL && f->type == QZ_T_DOUBLE) { double d; memcpy(&d, it->p, 8); printf("%g", d); }
+        else printf("%llu", (unsigned long long)it->v);
+        return;
+    }
+    if (it->wt == 5) {
+        if (f != NULL && f->type == QZ_T_FLOAT) { float g; memcpy(&g, it->p, 4); printf("%g", (double)g); }
+        else printf("%llu", (unsigned long long)it->v);
+        return;
+    }
+    if (f != NULL && f->repeated && f->type != QZ_T_MSG && f->type != QZ_T_STRING &&
+        f->type != QZ_T_BYTES) {
+        put_packed(f, it->p, it->len);
+        return;
+    }
+    put_bytes_as(f, owner, it->field, it->p, it->len, depth, indent);
+}
+
+static void render_msg(const uint8_t *b, size_t len, const qz_pmsg_t *msg, int depth,
+                       const char *indent)
+{
+    /* Collected first, printed second, so repeated fields become one JSON array rather than
+     * the same key repeated — which is what the data plane sends for every point in a batch. */
+    size_t cap = 32, n = 0;
+    item_t *items = malloc(cap * sizeof *items);
+    if (items == NULL) return;
+
+    size_t i = 0;
+    while (i < len) {
         uint64_t key;
         if (!read_varint(b, len, &i, &key)) break;
-        uint32_t field = (uint32_t)(key >> 3);
-        uint32_t wt    = (uint32_t)(key & 7);
+        item_t it = { (uint32_t)(key >> 3), (uint32_t)(key & 7), NULL, 0, 0 };
+        if (it.field == 0) break;
+        if (it.wt == 0) {
+            if (!read_varint(b, len, &i, &it.v)) break;
+        } else if (it.wt == 2) {
+            uint64_t l;
+            if (!read_varint(b, len, &i, &l) || i + l > len) break;
+            it.p = b + i; it.len = (size_t)l; i += l;
+        } else if (it.wt == 5) {
+            if (i + 4 > len) break;
+            it.p = b + i; it.len = 4; memcpy(&it.v, b + i, 4); i += 4;
+        } else if (it.wt == 1) {
+            if (i + 8 > len) break;
+            it.p = b + i; it.len = 8; memcpy(&it.v, b + i, 8); i += 8;
+        } else break;
+
+        if (n == cap) {
+            cap *= 2;
+            item_t *bigger = realloc(items, cap * sizeof *items);
+            if (bigger == NULL) break;
+            items = bigger;
+        }
+        items[n++] = it;
+    }
+
+    bool *done = calloc(n ? n : 1, sizeof *done);
+    if (done == NULL) { free(items); return; }
+
+    bool first = true;
+    for (size_t a = 0; a < n; a++) {
+        if (done[a]) continue;
+        const qz_pfield_t *f = field_of(msg, items[a].field);
+
+        size_t count = 0;
+        for (size_t c = a; c < n; c++) if (items[c].field == items[a].field) count++;
 
         if (!first) printf(",\n");
         first = false;
         printf("%s%*s", indent, depth * 2, "");
+        if (f != NULL) printf("\"%s\": ", f->name);
+        else           printf("\"%u\": ", items[a].field);
 
-        const char *name = lookup(names, field);
-        if (name != NULL) printf("\"%s\": ", name);
-        else              printf("\"%u\": ", field);
-
-        if (wt == 0) {
-            uint64_t v;
-            if (!read_varint(b, len, &i, &v)) break;
-            /* An ErrorCode is the one varint worth spelling out: "code": 4 is a lookup the
-             * reader has to do by hand, and the raw number is still in the hex above. */
-            if (names == ERRORINFO && field == 1) printf("\"%s\"", qz_error_name(v));
-            else printf("%llu", (unsigned long long)v);
-        } else if (wt == 2) {
-            uint64_t l;
-            if (!read_varint(b, len, &i, &l)) break;
-            if (i + l > len) break;
-            /* A zero-length ErrorInfo is an absent error, not an empty string. */
-            if (l == 0 && names == RSP_ENV && field == 7) printf("{}");
-            else render_value(field, wt, b + i, (size_t)l, descend(names, field), depth, indent);
-            i += l;
-        } else if (wt == 5) { i += 4; printf("null"); }
-        else if (wt == 1)   { i += 8; printf("null"); }
-        else break;
+        if (count > 1) {
+            printf("[");
+            bool sep = false;
+            for (size_t c = a; c < n; c++) {
+                if (items[c].field != items[a].field) continue;
+                done[c] = true;
+                if (sep) printf(", ");
+                sep = true;
+                put_item(&items[c], f, msg, depth, indent);
+            }
+            printf("]");
+        } else {
+            done[a] = true;
+            put_item(&items[a], f, msg, depth, indent);
+        }
     }
     printf("\n");
+    free(done);
+    free(items);
 }
 
-
-
-/** The one call a caller needs: the packet exactly as it goes on the wire, then what it says.
- *
- * Both views, both directions. The hex is the only record of what was actually transmitted —
- * a decoder can be wrong, and this project has already had one that was, silently putting a
- * payload in the field a request reserves for `encoding`. The JSON is what makes 141 bytes of
- * nested protobuf mean something. */
 static void dump_hex(const uint8_t *buf, size_t len, const char *indent)
 {
     printf("%sencoded (%zu B)\n", indent, len);
-    for (size_t i = 0; i < len; i++) {                 /* every byte, never a preview */
+    for (size_t i = 0; i < len; i++) {
         if (i % 32 == 0) printf("%s  ", indent);
         printf("%02x", buf[i]);
         printf("%s", ((i + 1) % 32 == 0 || i + 1 == len) ? "\n" : " ");
     }
 }
 
-static void dump_json(const uint8_t *buf, size_t len, bool is_response, const char *indent)
+static void dump_json(const uint8_t *buf, size_t len, const char *indent)
 {
     printf("%sjson\n%s{\n", indent, indent);
-    render(buf, len, is_response ? RSP_ENV : REQ_ENV, 1, indent);
+    render_msg(buf, len, g_env, 1, indent);
     printf("%s}\n", indent);
 }
 
-void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *service,
-                    const char *indent)
+/** Reads `service_id` (2) and `op` (3) out of the envelope so the payload can be routed. */
+static void resolve_payload(const uint8_t *buf, size_t len, bool is_response)
 {
-    g_payload_names = NULL;
-    if (service != NULL && strcmp(service, "system.boardinfo") == 0)
-        g_payload_names = BOARDINFO_RESPONSE;
+    char service[64] = { 0 };
+    uint64_t op = 0;
+    size_t i = 0;
+    while (i < len) {
+        uint64_t key;
+        if (!read_varint(buf, len, &i, &key)) break;
+        uint32_t f = (uint32_t)(key >> 3), wt = (uint32_t)(key & 7);
+        if (wt == 0) {
+            uint64_t v;
+            if (!read_varint(buf, len, &i, &v)) break;
+            if (f == 3) op = v;
+        } else if (wt == 2) {
+            uint64_t l;
+            if (!read_varint(buf, len, &i, &l) || i + l > len) break;
+            if (f == 2 && l < sizeof service) memcpy(service, buf + i, (size_t)l);
+            i += l;
+        } else if (wt == 5) i += 4;
+        else if (wt == 1)   i += 8;
+        else break;
+    }
+    g_pl_kind = qz_payload_type(service[0] ? service : NULL, op, is_response, &g_pl_msg);
+}
 
-    /* Ordered the way each direction actually happens, so the listing reads as the sequence of
-     * events rather than as two unrelated views: a request is composed and then encoded, a
-     * response arrives encoded and is then decoded. */
-    if (!is_response) { dump_json(buf, len, false, indent); dump_hex(buf, len, indent); }
-    else              { dump_hex(buf, len, indent); dump_json(buf, len, true, indent); }
-    g_payload_names = NULL;
+void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *indent)
+{
+    g_env      = qz_msg_find(is_response ? "ResponseEnvelope" : "RequestEnvelope");
+    g_pl_field = is_response ? 6 : 8;    /* the envelopes are not symmetric here */
+    resolve_payload(buf, len, is_response);
+
+    /* Ordered the way each direction actually happens, so the listing reads as a sequence of
+     * events rather than two unrelated views: a request is composed and then encoded, a reply
+     * arrives encoded and is then decoded. */
+    if (!is_response) { dump_json(buf, len, indent); dump_hex(buf, len, indent); }
+    else              { dump_hex(buf, len, indent);  dump_json(buf, len, indent); }
+
+    g_env = NULL; g_pl_msg = NULL; g_pl_kind = QZ_PL_UNKNOWN;
+}
+
+const char *qz_error_name(uint64_t code)
+{
+    for (int i = 0; i < qz_nenums; i++) {
+        if (strstr(qz_enums[i].name, "ErrorCode") == NULL) continue;
+        for (int v = 0; v < qz_enums[i].nvals; v++)
+            if (qz_enums[i].vals[v].value == code) return qz_enums[i].vals[v].name;
+    }
+    return "ERROR_?";
 }

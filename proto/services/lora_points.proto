@@ -1,0 +1,65 @@
+// lora_points.proto — `lora.points` data-plane schema.
+//
+// READ   -> PointReadRequest in, PointValues out
+// WRITE  -> PointWrite in, WriteAck out (Droplet fields are read-only — every
+//           write is rejected WR_NOT_WRITABLE until actuator channels land)
+// notify -> PointValues with envelope.is_notification = true
+//
+// Field-for-field identical to modbus_points.proto / bacnet_points.proto —
+// deliberate, per the family rule those two established: past the decode a
+// point is an id, a number and a quality, and a consumer needs no LoRa
+// knowledge to render one. Only the service id differs. Kept as its own
+// package so the plane can version independently (and nanopb needs a concrete
+// generated type per service).
+//
+// One PUSH-bus nuance: quality. A Droplet cannot be polled, so "fault" cannot
+// mean "did not answer". The board stamps Q_STALE when a device that has been
+// heard misses its expected transmit window (~3 missed periods), and Q_FAULT
+// only before the first frame ever arrives. Consumers already render both.
+
+syntax = "proto3";
+
+package rubix.embedded.lora.v1;
+
+enum Quality {
+  Q_UNSPECIFIED = 0;
+  Q_GOOD        = 1;
+  Q_STALE       = 2;   // device heard before, now missing its transmit window
+  Q_FAULT       = 3;   // never heard since provision
+}
+
+message PointValue {
+  uint32  point_id  = 1;
+  double  value     = 2;   // decoded engineering value; host applies LoraPointDef.scale
+  Quality quality   = 3;
+  uint64  src_ts_ms = 4;   // device clock, informational
+  uint64  seq_no    = 5;   // per-point monotonic; LWW authority
+}
+
+message PointValues {
+  repeated PointValue values = 1;   // bounded via .options; one frame per batch
+}
+
+message PointReadRequest {
+  repeated uint32 point_ids = 1;    // empty + all=true reads everything
+  bool            all       = 2;
+}
+
+message PointWrite {
+  uint32 point_id = 1;
+  double value    = 2;
+}
+
+enum WriteReject {
+  WR_UNSPECIFIED   = 0;
+  WR_UNKNOWN_POINT = 1;
+  WR_NOT_WRITABLE  = 2;   // Droplet field, or not marked writable
+  WR_VALUE_RANGE   = 3;
+}
+
+message WriteAck {
+  uint32      point_id      = 1;
+  bool        accepted      = 2;
+  double      applied_value = 3;
+  WriteReject reason        = 4;   // meaningful when accepted == false
+}

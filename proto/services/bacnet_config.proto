@@ -1,0 +1,142 @@
+// bacnet_config.proto — `bacnet.config` READ/WRITE schema.
+//
+// Carried inside RequestEnvelope.payload / ResponseEnvelope.payload.
+// READ  -> BacnetConfig (full middleware-owned snapshot on the device)
+// WRITE -> BacnetConfigDelta in, ConfigResult out (per-item atomic verdicts).
+//
+// The device end is the board's BACnet MS/TP *master*, reached over zenoh. This
+// is a different vantage point from the host-side BACnet/IP extension, which
+// speaks IP to devices on the LAN and does not involve the board at all.
+//
+// The shape mirrors modbus_config.proto so both protocols behave identically on
+// the host. Every difference below is forced by the board's master, not taste:
+//
+//   - no `interface`: the MS/TP datalink is a per-port board param
+//     (PARAM_IF_CONN_RS485_*), not a per-device choice. A port is Modbus master
+//     OR BACnet MS/TP, never both.
+//   - no `baud`/`parity`: MS/TP line rate comes from the port config string
+//     (PARAM_CONFIG_RS485_*). The stack cannot change it — rs485_baud_rate_set()
+//     is a stub returning false. Modbus's per-device baud multiplex has no
+//     BACnet analogue.
+//   - no `data_type`: Present_Value is a float on the wire.
+//   - `mac_addr` is a LOCAL MS/TP MAC. The master hardcodes DNET 0, so a device
+//     behind a BACnet router (the `net:mac` form, e.g. 2:3) is UNREACHABLE.
+//     The target must be wired to the board's own RS485 segment.
+//
+// Writes leave the board at BACnet priority 1 and are never relinquished. See
+// BacnetPointDef.writable.
+
+syntax = "proto3";
+
+package rubix.embedded.bacnet.v1;
+
+// ---------------------------------------------------------------------------
+// Definitions
+// ---------------------------------------------------------------------------
+
+// BACnet object types the board's master can address. Ordering is the contract's
+// own (1-based, 0 reserved for unspecified); the board maps these onto its
+// internal 0-based point-type enum.
+enum BacnetObjectType {
+  OBJ_UNSPECIFIED = 0;
+  OBJ_AI          = 1;   // Analog Input  — read-only, see `writable`
+  OBJ_AO          = 2;   // Analog Output
+  OBJ_AV          = 3;   // Analog Value
+  OBJ_BI          = 4;   // Binary Input  — read-only, see `writable`
+  OBJ_BO          = 5;   // Binary Output
+  OBJ_BV          = 6;   // Binary Value
+}
+
+enum PollClass {
+  POLL_UNSPECIFIED = 0;
+  POLL_FAST        = 1;
+  POLL_NORMAL      = 2;
+  POLL_SLOW        = 3;
+}
+
+// One MS/TP target on the board's RS485 segment.
+//
+// There is no discovery: the board's master never sends Who-Is. It synthesises
+// an address-cache entry from `mac_addr` alone and assumes the peer's max-APDU.
+// The MAC must therefore be known and correct up front — a wrong MAC presents
+// as a permanently faulted point, not as an error.
+message BacnetDeviceDef {
+  uint32 device_id = 1;   // middleware-owned id (the host component uid)
+  uint32 mac_addr  = 2;   // MS/TP MAC 0..254, local segment only
+  bool   enabled   = 3;
+}
+
+message BacnetPointDef {
+  uint32           point_id     = 1;
+  uint32           device_ref   = 2;   // BacnetDeviceDef.device_id
+  BacnetObjectType obj_type     = 3;
+  uint32           obj_instance = 4;   // BACnet instance number 0..4194302
+
+  // engineering = raw * scale (0 forbidden; treated as 1). Applied host-side,
+  // never on the board — same split as Modbus. BACnet Present_Value already
+  // carries engineering units, so this is normally 1 and exists for unit
+  // conversion (e.g. °C -> °F) rather than register decoding.
+  float            scale        = 5;
+
+  // Must agree with obj_type: the board rejects writes to AI and BI outright,
+  // because its master decides writability from the object type, not this flag.
+  // Setting writable=true on an AI/BI yields a rejected write, not a failed one.
+  //
+  // WARNING — writes are permanent. The board's master issues WriteProperty at
+  // BACnet priority 1 (the highest) and has no relinquish path: it never writes
+  // NULL to release the slot. The first value written to a point seizes that
+  // point's priority-1 slot on the target device for good, overriding any local
+  // logic or BMS command there until the target reboots. Only mark points
+  // writable when that is the intent.
+  bool             writable     = 6;
+
+  PollClass        poll_class   = 7;
+
+  // Operator-facing display name (the wiresheet component's name, e.g.
+  // "relay6"). Host-owned and purely descriptive — the board stores it and
+  // hands it back in the config READ snapshot so a non-wiresheet consumer
+  // (the phone) can label points the way the operator does. Empty is legal
+  // (older hosts); consumers must fall back to the point id. Same field
+  // semantics and bound as ModbusPointDef.name.
+  string           name         = 8;
+}
+
+// ---------------------------------------------------------------------------
+// READ response — full snapshot of middleware-owned config on the device.
+// ---------------------------------------------------------------------------
+
+message BacnetConfig {
+  repeated BacnetDeviceDef devices = 1;   // bounded via .options
+  repeated BacnetPointDef  points  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// WRITE request/response — delta-only, per-item atomic (no replaceAll by design).
+// ---------------------------------------------------------------------------
+
+message BacnetConfigDelta {
+  repeated BacnetDeviceDef upsert_devices    = 1;
+  repeated BacnetPointDef  upsert_points     = 2;
+  repeated uint32          remove_device_ids = 3;
+  repeated uint32          remove_point_ids  = 4;
+}
+
+enum ConfigReject {
+  REJ_UNSPECIFIED = 0;
+  REJ_POOL_FULL   = 1;   // device point/device pool exhausted
+  REJ_IFACE_ROLE  = 2;   // no RS485 port is configured for BACnet MS/TP
+  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
+  REJ_DUPLICATE   = 4;   // duplicate mac / duplicate point id
+  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
+  REJ_INVALID     = 6;   // failed device-side field validation
+}
+
+message ConfigResultItem {
+  uint32       id     = 1;
+  ConfigReject reason = 2;
+}
+
+message ConfigResult {
+  repeated uint32           applied_ids = 1;
+  repeated ConfigResultItem rejected    = 2;
+}

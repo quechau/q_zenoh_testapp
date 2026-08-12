@@ -1,0 +1,121 @@
+// lora_config.proto — `lora.config` READ/WRITE schema.
+//
+// Carried inside RequestEnvelope.payload / ResponseEnvelope.payload.
+// READ  -> LoraConfig (full middleware-owned snapshot on the device)
+// WRITE -> LoraConfigDelta in, ConfigResult out (per-item atomic verdicts).
+//
+// The device end is the board's LoRaRaw (Rubix-over-LoRa) slave interface. This
+// differs from Modbus/BACnet in one structural way that shapes the whole plane:
+// the field bus is PUSH, not poll. A Droplet sensor broadcasts an encrypted
+// frame every few minutes and sleeps; the board cannot ask it anything. So:
+//
+//   - no poll_class: there is no poll loop. The board registers a receive
+//     handler per device address and the notify plane rides each reception.
+//   - a "point" selects a FIELD of the device's frame (temperature, humidity,
+//     ...), not a register/object address. One frame updates every point of
+//     that device at once.
+//   - `dev_addr` is the 32-bit LoRaRaw device address (e.g. 0x6CC06351),
+//     derived from the sensor's chip id and printed on its console at boot.
+//   - writable points exist only on actuator devices (water valve — later
+//     phase); Droplet fields are read-only and the board rejects writes to
+//     them with WR_NOT_WRITABLE, exactly like a BACnet BI.
+//
+// The shape mirrors modbus_config/bacnet_config so the host treats all three
+// protocols identically past the codec.
+
+syntax = "proto3";
+
+package rubix.embedded.lora.v1;
+
+// ---------------------------------------------------------------------------
+// Definitions
+// ---------------------------------------------------------------------------
+
+// Which field of a device's frame this point carries. Values 1..6 are the
+// Droplet payload (see the board's decoder: bytes 4..12 of the decrypted
+// frame); RSSI/SNR are radio metadata stamped by the receiver, not payload.
+enum LoraField {
+  FIELD_UNSPECIFIED = 0;
+  FIELD_TEMPERATURE = 1;   // degrees C   (raw u16 / 100)
+  FIELD_PRESSURE    = 2;   // kPa         (raw u16 / 100)
+  FIELD_HUMIDITY    = 3;   // percent     (raw u16 / 100)
+  FIELD_LUX         = 4;   // lux         (raw u16 / 100)
+  FIELD_BATTERY     = 5;   // volts       (raw u8 * 0.02)
+  FIELD_PACKET_COUNT = 6;  // frames received since provision/reset
+  FIELD_RSSI        = 7;   // dBm, receiver-stamped
+  FIELD_SNR         = 8;   // dB, receiver-stamped
+  // Actuator channels (valve) land in a later revision; they will extend this
+  // enum rather than introduce a second addressing scheme.
+}
+
+// One LoRaRaw device the board listens for.
+//
+// There is no discovery: the sensor broadcasts on its own schedule and the
+// address must be known up front (it is printed by the sensor at boot). A
+// wrong address presents as a point that never leaves its initial fault —
+// same failure shape as a wrong MS/TP MAC.
+message LoraDeviceDef {
+  uint32 device_id = 1;   // middleware-owned id (the host component uid)
+  uint32 dev_addr  = 2;   // 32-bit LoRaRaw address, e.g. 0x6CC06351
+  bool   enabled   = 3;
+}
+
+message LoraPointDef {
+  uint32    point_id   = 1;
+  uint32    device_ref = 2;   // LoraDeviceDef.device_id
+  LoraField field      = 3;
+
+  // engineering = decoded * scale (0 forbidden; treated as 1). The board
+  // already applies the frame's fixed decode (u16/100 etc.); scale exists for
+  // unit conversion on the host, normally 1.
+  float     scale      = 4;
+
+  // Droplet fields are read-only; the board rejects writes regardless of this
+  // flag (decided by the FIELD, like BACnet decides by object type). Reserved
+  // for actuator channels.
+  bool      writable   = 5;
+
+  // Operator-facing display name (the wiresheet component's name). Same
+  // semantics and bound as ModbusPointDef.name / BacnetPointDef.name.
+  string    name       = 6;
+}
+
+// ---------------------------------------------------------------------------
+// READ response — full snapshot of middleware-owned config on the device.
+// ---------------------------------------------------------------------------
+
+message LoraConfig {
+  repeated LoraDeviceDef devices = 1;   // bounded via .options
+  repeated LoraPointDef  points  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// WRITE request/response — delta-only, per-item atomic (no replaceAll).
+// ---------------------------------------------------------------------------
+
+message LoraConfigDelta {
+  repeated LoraDeviceDef upsert_devices    = 1;
+  repeated LoraPointDef  upsert_points     = 2;
+  repeated uint32        remove_device_ids = 3;
+  repeated uint32        remove_point_ids  = 4;
+}
+
+enum ConfigReject {
+  REJ_UNSPECIFIED = 0;
+  REJ_POOL_FULL   = 1;   // device/point pool exhausted
+  REJ_IFACE_ROLE  = 2;   // LoRa radio not present/enabled on this board
+  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
+  REJ_DUPLICATE   = 4;   // duplicate dev_addr / duplicate point id
+  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
+  REJ_INVALID     = 6;   // failed device-side field validation
+}
+
+message ConfigResultItem {
+  uint32       id     = 1;
+  ConfigReject reason = 2;
+}
+
+message ConfigResult {
+  repeated uint32           applied_ids = 1;
+  repeated ConfigResultItem rejected    = 2;
+}

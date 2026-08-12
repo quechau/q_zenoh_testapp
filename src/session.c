@@ -207,7 +207,7 @@ static void on_any(z_loaned_sample_t *sample, void *arg)
     }
     qz_log("RECV", "[%u] %.*s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
            z_string_data(z_loan(ks)), n);
-    if (st->dump && d != NULL && n > 0) qz_packet_dump(d, n, true, NULL, "              ");
+    if (st->dump && d != NULL && n > 0) qz_packet_dump(d, n, true, "              ");
     if (d != NULL) z_drop(z_move(slice));
 }
 
@@ -320,7 +320,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     if (blen < 0) { z_drop(z_move(sub)); qz_log("ERR", "envelope too large"); return -1; }
 
     qz_log("REQ", "%s  %dB  seq=%u", req_key, blen, st.seq);
-    qz_packet_dump(body, (size_t)blen, false, service, "              ");
+    qz_packet_dump(body, (size_t)blen, false, "              ");
 
     z_view_keyexpr_t req_ke;
     z_view_keyexpr_from_str(&req_ke, req_key);
@@ -348,7 +348,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     }
     qz_log("ACK", "seq=%u  %zuB  round trip %llu ms", st.seq, st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
-    qz_packet_dump(st.reply, st.reply_len, true, service, "              ");
+    qz_packet_dump(st.reply, st.reply_len, true, "              ");
 
     /* Field 7 of a ResponseEnvelope is an ErrorInfo message, not a number. Printing its two
      * raw bytes said nothing; decoding it turns "<2 B> 08 04" into ERROR_PERMISSION. */

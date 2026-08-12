@@ -1,0 +1,62 @@
+// bacnet_points.proto — `bacnet.points` data-plane schema.
+//
+// READ   -> PointReadRequest in, PointValues out
+// WRITE  -> PointWrite in, WriteAck out (ack = accepted into device cache,
+//           NOT bus-confirmed; authoritative confirmation is COV read-back)
+// notify -> PointValues with envelope.is_notification = true
+//
+// These messages are field-for-field identical to modbus_points.proto. That is
+// deliberate, not an oversight: the data plane carries a point id and a number,
+// and nothing about a register or an object survives to this layer. The two are
+// kept as separate packages rather than a shared one so each service can version
+// independently — and because nanopb needs a concrete generated type per service.
+//
+// A consumer that renders points therefore needs no BACnet knowledge: the shapes
+// it already decodes for Modbus work unchanged. Only the service id differs.
+
+syntax = "proto3";
+
+package rubix.embedded.bacnet.v1;
+
+enum Quality {
+  Q_UNSPECIFIED = 0;
+  Q_GOOD        = 1;
+  Q_STALE       = 2;
+  Q_FAULT       = 3;   // device-stamped source fault (MS/TP read failed)
+}
+
+message PointValue {
+  uint32  point_id  = 1;
+  double  value     = 2;   // Present_Value, raw; host applies BacnetPointDef.scale
+  Quality quality   = 3;
+  uint64  src_ts_ms = 4;   // device clock, informational
+  uint64  seq_no    = 5;   // per-point monotonic; LWW authority
+}
+
+message PointValues {
+  repeated PointValue values = 1;   // bounded via .options; one frame per batch
+}
+
+message PointReadRequest {
+  repeated uint32 point_ids = 1;    // empty + all=true reads everything
+  bool            all       = 2;
+}
+
+message PointWrite {
+  uint32 point_id = 1;
+  double value    = 2;
+}
+
+enum WriteReject {
+  WR_UNSPECIFIED   = 0;
+  WR_UNKNOWN_POINT = 1;
+  WR_NOT_WRITABLE  = 2;   // point is an AI/BI, or not marked writable
+  WR_VALUE_RANGE   = 3;
+}
+
+message WriteAck {
+  uint32      point_id      = 1;
+  bool        accepted      = 2;
+  double      applied_value = 3;
+  WriteReject reason        = 4;   // meaningful when accepted == false
+}
