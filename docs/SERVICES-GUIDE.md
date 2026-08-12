@@ -343,6 +343,129 @@ Tracing prints from the dispatch task, never the zenoh read callbacks, so a slow
 stall reception. It is still UART-speed: level 2 on a 640-byte request is about 2 KB of output,
 roughly 170 ms at 115200 baud. That is why it is off by default.
 
+
+---
+
+## 9. The devices on the bench
+
+The profiles in `test-services.sh` are the hardware from `ACB-M/docs/*-Module/*-test`, not
+invented examples. That matters more for Modbus than anywhere else: a wrong register address
+still reads *something*, and the reply looks perfectly healthy.
+
+### The address rule, verified
+
+**`address` in the config plane is the PDU address — the console number minus one.**
+
+```
+  register map (slave's own numbering)
+        │  the console convention differs per slave: the HVAC board support wants +1,
+        │  the ZC-Damper wants the number as printed
+        ▼
+  console:  mb_read_ao 1 11 1000
+        │  srvc_modbus subtracts 1
+        ▼
+  PDU:      999                      ←  this is what `address=` takes
+        │  zenoh_modbus.c adds 1 back for MBCTL, which is 1-based
+        ▼
+  slave:    1000 = Device Alive
+```
+
+Proven on hardware: `reg_type=REG_HOLDING address=999` on the ZC-Damper reads **53521**
+(`0xD111`), the constant alive value. Anything else means the convention is wrong, not that the
+damper is broken — which is exactly why that register is the first thing the profile provisions.
+
+### Modbus — HVAC board support (slave 1, 38400-8-N-1)
+
+| point | `address` | console | meaning |
+|---|---|---|---|
+| `hvac-power` | 40000 | `40001` | 0/1 |
+| `hvac-setpoint` | 40001 | `40002` | **0.1 °C** — 220 is 22.0 |
+| `hvac-room-temp` | 40002 | `40003` | read-only |
+| `hvac-conn` | 40007 | `40008` | AC attached? |
+
+```bash
+./scripts/test-services.sh modbus --device hvac
+```
+
+Measured: `hvac-setpoint` read **240** — the 24.0 °C left by the console test of 2026-07-03,
+still in place and now readable over zenoh. When `hvac-conn` reads 0 the AC is not attached and
+every other HVAC register reads 0 too; that is the slave's state, not a transport fault.
+
+A write needs `writable=true` **at provisioning time**. Without it the board answers
+`WR_NOT_WRITABLE` and never touches the bus — the flag is part of the point definition, not of
+the write.
+
+### Modbus — ZC-Damper (slave 11, 38400-8-N-1)
+
+| point | `reg_type` | `address` | console | meaning |
+|---|---|---|---|---|
+| `zcd-alive` | HOLDING | 999 | `1000` | always 53521 |
+| `zcd-pos-0` | INPUT | 999 | `1000` | damper 0 position, % |
+| `zcd-state-0` | INPUT | 1099 | `1100` | damper 0 state |
+| `zcd-target-0` | HOLDING | 42000 | `42001` | damper 0 target, 0..100 |
+
+Holding and input share the same numbers here — `reg_type` is what separates them, and it is
+the function code, not a label. After a reboot the board homes all ten dampers sequentially for
+2.5–5 minutes before anything responds sensibly, and a stroke takes ~15 s, so a read-back of a
+target must wait.
+
+### Modbus — DDM18SD energy meter (9600-8-E-1)
+
+```bash
+./scripts/test-services.sh modbus --device ddm18sd
+```
+
+**This meter is why per-device `baud` and `parity` exist.** It only speaks 9600-8-E-1 and wrong
+parity is total silence, so over the console the whole RS485 port had to be switched to
+9600-8-E-1 and back — during which nothing else on the bus could be reached. In the config plane
+the line rate travels *with the device* and the board applies it before each transaction, so the
+meter and a 38400-8-N-1 ZC-Damper can share one bus, time-multiplexed. That only works if the
+board reports what it stored, which is the fix in §4.
+
+Its values are IEEE-754 floats over two registers (high word first), so the points use
+`data_type=DT_F32`. It is read-only over this path: changing anything on the meter needs FC
+0x10, which the master does not issue. Note it answers to unit 1, the same as the HVAC board
+support — the two cannot be wired at once.
+
+### BACnet MS/TP IO card
+
+```bash
+./scripts/test-services.sh bacnet --device io-card --mac 11
+```
+
+`mac_addr` is the DIP-switch setting on the card. There is no discovery, so a wrong DIP is a
+permanently faulted point rather than an error. Writes go out at priority 1 and are never
+relinquished — see §4.
+
+---
+
+## 10. A defect this testing found, still open
+
+On the ZC-Damper's alive register — a constant, `0xD111` — the polled value **alternates between
+53521 and 0 while `quality` stays `Q_GOOD`**:
+
+```
+points modbus read 201     seq_no 10   (no value → 0)
+points modbus read 201     seq_no 12   (no value → 0)
+points modbus read 201     seq_no 14   (no value → 0)
+points modbus read 201     seq_no 20   value 53521
+points modbus read 201     seq_no 25   value 53521
+```
+
+`seq_no` is per-point and bumps on every change, so it climbing steadily is the board telling
+you the value really is flipping, not that the read is stale. A register that cannot change is
+changing.
+
+This matters more than a fault would: `Q_FAULT` tells a consumer to disregard the value, while
+`Q_GOOD` with a zero invites it to act on one. Any control loop reading this point sees the
+damper alive, then dead, then alive.
+
+It is worse with more points provisioned on the same device, and a single point alone reads
+53521 for long stretches — which points at the transaction/response pairing rather than at the
+slave. `zenoh_modbus.c` already carries a comment about a late response landing on the *next*
+transaction and failing its address check; a mis-paired response being published as good rather
+than dropped would produce exactly this. Not investigated further here.
+
 ---
 
 ## Related
