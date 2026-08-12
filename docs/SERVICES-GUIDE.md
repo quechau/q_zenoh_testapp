@@ -593,6 +593,153 @@ This tool takes the exact key rather than the tolerant one, because demonstratin
 is the point. Against a board that predates the change it will simply time out — so the timeout
 says so, and names the key such a board would have used.
 
+
+---
+
+## 12. Recipes
+
+Copy-paste, verified against `acbm-1cdbd4abbc7c`. `EP` keeps the endpoint in one place; drop it
+entirely and the tool finds the board itself (mDNS for the name, a TCP sweep for the address).
+
+```bash
+cd ~/qs/repos-no-5/q_zenoh_testapp
+EP="tls/192.168.10.29:7447"
+PW="acbm-fabric-2026"
+```
+
+### Several commands in one session
+
+One session, one login, commands in order. Use this rather than a loop of one-shot invocations:
+each invocation opens and closes a session, and a session ending makes the board's next notify
+publish fail, which re-arms COV on every point (§10).
+
+```bash
+{
+  echo "login $PW"
+  echo "config modbus read"
+  echo "points modbus read"
+  echo "quit"
+} | timeout 120 ./build/q_zenoh_testapp --endpoint "$EP"
+```
+
+### Provision a point and watch it settle
+
+The question this answers: does the point read its register, or is it reporting a value it has
+not fetched yet? `del-point` first makes the recipe repeatable.
+
+```bash
+{
+  echo "login $PW"
+  echo "config modbus del-point 250"
+  echo "config modbus add-point point_id=250 device_ref=11 reg_type=REG_HOLDING \
+        address=999 data_type=DT_U16 scale=1 poll_class=POLL_FAST name=probe"
+  echo "points modbus read 250"
+  echo "points modbus read 250"
+  echo "quit"
+} | timeout 120 ./build/q_zenoh_testapp --endpoint "$EP" 2>&1 \
+  | grep -E '"value"|"quality"|"seq_no"' | tr -d ' ' | paste -sd' ' - \
+  | sed 's/^/  fresh: /'
+
+sleep 12
+printf "login $PW\npoints modbus read 250\nquit\n" \
+  | timeout 60 ./build/q_zenoh_testapp --endpoint "$EP" 2>&1 \
+  | grep -E '"value"|"quality"|"seq_no"' | tr -d ' ' | paste -sd' ' - \
+  | sed 's/^/  after 12s: /'
+```
+
+```
+  fresh:     "value":53521, "quality":"Q_GOOD", "value":53521, "quality":"Q_GOOD",
+  after 12s: "value":53521, "quality":"Q_GOOD", "seq_no":3
+```
+
+`grep | tr -d ' ' | paste -sd' '` collapses each reply to one line, which is what makes several
+readings comparable at a glance. Drop the pipeline to see the full packets.
+
+### Watch one value across reads
+
+```bash
+for i in 1 2 3 4 5 6; do
+  printf "login $PW\npoints modbus read 201\nquit\n" \
+    | timeout 60 ./build/q_zenoh_testapp --endpoint "$EP" 2>&1 \
+    | grep -E '"value"|"seq_no"' | tr -d ' \n' | sed "s/^/  #$i /"; echo
+done
+```
+
+Note each iteration is its own session. If you are watching `seq_no`, that matters — see §10.
+
+### Only the exchange, not the packets
+
+```bash
+... | grep -E "^\[.*(REQ|ACK|AUTH|ERR) "
+```
+
+```
+  [  6.029s] REQ      system.auth EXECUTE  seq=4000861847  74B
+  [  6.079s] ACK      system.auth EXECUTE  seq=4000861847  27B  round trip 51 ms
+  [  6.079s] AUTH     UNLOCKED as ce-acf23c0d8637
+```
+
+### The whole service, end to end
+
+```bash
+./scripts/test-services.sh modbus --device zcd  --endpoint "$EP" --sub-secs 10
+./scripts/test-services.sh modbus --device hvac --endpoint "$EP"
+./scripts/test-services.sh bacnet --device io-card --mac 11 --endpoint "$EP"
+./scripts/test-services.sh lora   --sub-secs 300 --endpoint "$EP"
+./scripts/test-services.sh modbus --device zcd --clean       # remove what it created
+```
+
+### Both ends of the same exchange
+
+Enable the board's tracer, run a command, and pair the two logs by `seq`. Open the serial port
+**once** — opening it a second time toggles DTR/RTS and reboots the ESP32-S3, which looks like a
+crash in the middle of your test.
+
+```bash
+python3 - <<'PYEOF'
+import serial, subprocess, time, threading
+ser = serial.Serial('/dev/ttyACM0', 115200, timeout=0.2)
+buf, stop = [], False
+def rx():
+    while not stop:
+        d = ser.read(4096)
+        if d: buf.append(d.decode('utf-8', 'replace'))
+threading.Thread(target=rx, daemon=True).start()
+time.sleep(1)
+ser.write(b'\r\nlogin technician 123456\r\n'); time.sleep(2)   # param_set needs Technician
+ser.write(b'param_set 710 1\r\n'); time.sleep(2)                # 0 off, 1 JSON, 2 JSON+hex
+buf.clear(); time.sleep(7)                                       # the level is cached ~5 s
+r = subprocess.run(['./build/q_zenoh_testapp', '--endpoint', 'tls/192.168.10.29:7447'],
+                   input="login acbm-fabric-2026\nboardinfo\nquit\n",
+                   capture_output=True, text=True, timeout=120)
+time.sleep(3); stop = True; time.sleep(0.5); ser.close()
+open('/tmp/board.txt', 'w').write(''.join(buf))
+open('/tmp/client.txt', 'w').write(r.stdout)
+PYEOF
+
+grep -E "ZTR: (RX|TX)" /tmp/board.txt
+grep -E "(REQ|ACK) " /tmp/client.txt
+```
+
+```
+I ZTR: RX << rubix/acbm-1cdbd4abbc7c/svc/system.auth/req                             seq=2178265798   74 bytes
+I ZTR: TX >> rubix/acbm-1cdbd4abbc7c/svc/system.auth/ack/ce-acf23c0d8637/2178265798  seq=2178265798   27 bytes
+```
+
+Leave the board quiet again with `param_set 710 0` — the level lives in NVS and survives reboots.
+
+### Start from nothing
+
+```bash
+{
+  echo "login $PW"
+  echo "config modbus del-point 201 210 211 212 250"
+  echo "config modbus del-device 1 2 11"
+  echo "config modbus read"                       # expect no payload: an empty config
+  echo "quit"
+} | timeout 120 ./build/q_zenoh_testapp --endpoint "$EP"
+```
+
 ---
 
 ## Related
