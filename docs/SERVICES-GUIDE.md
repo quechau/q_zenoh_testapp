@@ -1015,7 +1015,17 @@ config modbus add-point point_id=201 device_ref=11 reg_type=REG_HOLDING address=
 
 **Send every field, not just the one you are changing.** The upsert replaces the definition
 rather than merging into it, so a field you leave out reverts to its proto3 default — omit
-`writable` and the point becomes read-only.
+`writable` and the point becomes read-only. Measured on the bench:
+
+```
+config bacnet add-point point_id=306 … writable=true …   -> applied_ids [306]
+points bacnet write point_id=306 value=1                 -> accepted: true
+config bacnet add-point point_id=306 … (no writable) …   -> applied_ids [306]
+points bacnet write point_id=306 value=0                 -> reason: WR_NOT_WRITABLE
+```
+
+The board accepted the second definition without complaint — it is a valid point, just a
+read-only one now. Nothing warns you; the next write is simply refused.
 
 Editing a **device** is the same call, and carries a consequence worth knowing:
 
