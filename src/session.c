@@ -211,13 +211,9 @@ static void on_any(z_loaned_sample_t *sample, void *arg)
      * look for a request that never existed. */
     uint64_t nseq = 0;
     if (d != NULL && n > 0) (void)qz_field_varint(d, n, 4, &nseq);
-    /* Bare `cov` when there is no seq, rather than `cov_0`: a notification pairs with no
-     * request, and printing a zero invites the reader to go looking for transaction 0. */
-    char tag[24];
-    if (nseq != 0) snprintf(tag, sizeof tag, "cov_%u", (unsigned)nseq);
-    else           snprintf(tag, sizeof tag, "cov");
-    qz_log("RECV", "[%u] %.*s  %s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
-           z_string_data(z_loan(ks)), tag, n);
+    (void)nseq;
+    qz_log("COV", "[%u] %.*s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
+           z_string_data(z_loan(ks)), n);
     if (st->dump && d != NULL && n > 0) qz_packet_dump(d, n, true, "              ");
     if (d != NULL) z_drop(z_move(slice));
 }
@@ -352,10 +348,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
     /* The verb and the transaction id lead, so a reply key is unique per call and this
      * subscription is exact — zenoh delivers this call's reply and nothing else. */
-    snprintf(ack_key, sizeof(ack_key), "res/%u/%s/%s/svc/%s",
+    snprintf(ack_key, sizeof(ack_key), "res/txn_%08x/%s/%s/svc/%s",
              st.seq, ctx->client_id, ctx->board, service);
     /* Same shape on the way out. The board subscribes on req, one wildcard where the seq goes. */
-    snprintf(req_key, sizeof(req_key), "req/%u/%s/svc/%s", st.seq, ctx->board, service);
+    snprintf(req_key, sizeof(req_key), "req/txn_%08x/%s/svc/%s", st.seq, ctx->board, service);
 
     /* Subscribe BEFORE publishing: the board answers in tens of milliseconds and a late
      * subscriber simply misses it. */
@@ -379,7 +375,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     /* tx_ going out, rx_ coming back, cov_ for a notification nobody asked for. The NUMBER is
      * the same at both ends of one exchange — this tool's tx_41 is the board's rx_41 — so
      * grepping the number finds both halves; only the prefix says which half. */
-    qz_log("REQ", "%s  %s  tx_%u  %dB", req_key, qz_op_name(op), st.seq, blen);
+    qz_log("REQ", "%s  %s  %dB", req_key, qz_op_name(op), blen);
     qz_packet_dump(body, (size_t)blen, false, "              ");
 
     z_view_keyexpr_t req_ke;
@@ -410,8 +406,8 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
                ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
     }
-    qz_log("RES", "%s  %s  rx_%u  %zuB  round trip %llu ms",
-           st.key[0] ? st.key : ack_key, qz_op_name(op), st.seq, st.reply_len,
+    qz_log("RES", "%s  %s  %zuB  round trip %llu ms",
+           st.key[0] ? st.key : ack_key, qz_op_name(op), st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
     qz_packet_dump(st.reply, st.reply_len, true, "              ");
 

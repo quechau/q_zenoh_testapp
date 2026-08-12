@@ -998,15 +998,40 @@ HINT  rubix.embedded.modbus.v1.ModbusPointDef accepts:
 
 ### Change something already provisioned
 
-Send the definition again with the same id. It is an upsert, and the board says which it was:
+Send the definition again with the same id. It is an upsert — there is no separate edit — and the
+board says which it was:
 
 ```
 LIFECYCLE point=201 ... unchanged            nothing moved
 LIFECYCLE point=201 ... re-provisioned       the definition changed
 ```
 
-Changing a **device's** `unit_id`, port, `baud` or `parity` invalidates every point under it —
-they are re-provisioned against the new line, and their values start again from nothing.
+Editing a point, e.g. to make it writable or move its register:
+
+```bash
+config modbus add-point point_id=201 device_ref=11 reg_type=REG_HOLDING address=999 \
+                        data_type=DT_U16 scale=1 writable=true poll_class=POLL_SLOW name=zcd-alive
+```
+
+**Send every field, not just the one you are changing.** The upsert replaces the definition
+rather than merging into it, so a field you leave out reverts to its proto3 default — omit
+`writable` and the point becomes read-only.
+
+Editing a **device** is the same call, and carries a consequence worth knowing:
+
+```bash
+config modbus add-device device_id=11 unit_id=11 interface=IF_RS485_1 enabled=true \
+                         baud=19200 parity=PAR_EVEN
+```
+
+Changing a device's `unit_id`, `interface`, `baud` or `parity` **invalidates every point under
+it**. They are re-provisioned against the new line and their values start again from nothing, so
+expect `Q_FAULT` and a zero until the first poll on the new settings completes. Changing only
+`enabled` does not.
+
+Reusing a `device_id` for a different physical device is the same operation and the same
+consequence — the id is the key of the upsert, so every point whose `device_ref` names it now
+addresses the new device. That is how a set of HVAC points once ended up addressing a damper.
 
 ### Remove
 
@@ -1014,6 +1039,23 @@ they are re-provisioned against the new line, and their values start again from 
 config modbus del-point 201 202       # several at once
 config modbus del-device 11           # its points go too
 ```
+
+Removal is by id and takes several in one call. There is no "remove everything" — the contract
+has no replace-all, by design, so nothing a consumer sends can clear a board by omission. To
+start clean, delete by id:
+
+```bash
+{
+  echo "login $PW"
+  echo "config modbus del-point 201 202 203 204 210 211 212"
+  echo "config modbus del-device 1 2 11"
+  echo "config modbus read"                  # expect no payload: an empty config
+  echo "quit"
+} | ./build/q_zenoh_testapp --endpoint "$EP"
+```
+
+A board restart also clears it, since the config lives in RAM — but then the host re-syncs, so
+that is not a way to keep a board empty.
 
 ### Watch values change
 
@@ -1035,6 +1077,88 @@ stable bus is the normal state; it is not a failure to receive.
 
 `discover` is what `login` runs when it needs a nonce, because the proof is
 `sha256(nonce : client_id : sha256(password))` and **the nonce changes on every board reboot**.
+
+
+---
+
+## 14. Turning the logs on and off
+
+Three ends, three switches. The useful thing is that they print the **same exchange** — pair them
+by the `txn_<hex>` in the key and you can see a request leave one, arrive at the next, and its
+reply come back.
+
+| end | switch | what it adds | where it goes |
+| --- | --- | --- | --- |
+| `q_zenoh_testapp` | *(always on)* | every packet as bytes and as JSON | stdout |
+| `q_zenoh_testapp` | `--debug` / `QZ_DEBUG=1` | zenoh-pico's own DEBUG and INFO — a line per frame and per keep-alive | stdout |
+| ACB-M board | `param_set 710 1` | key + JSON of every packet, both directions | the board console |
+| ACB-M board | `param_set 710 2` | the same plus the full hex buffer | the board console |
+| ce-edgelink | `EDGELINK_DIAG=1` | the decision trace: `JOIN`, `AUTH result=…`, `SYNC`, `NOTIFY`, `WRITE` | `/tmp/edgelink-diag.log` |
+| ce-edgelink | `EDGELINK_TRACE=1` | key + JSON of every packet | the same file |
+| ce-edgelink | `EDGELINK_TRACE=2` | the same plus the full hex | the same file |
+
+### The board
+
+```
+acb-m-riot> login technician 123456      # param_set needs Technician or higher
+acb-m-riot> param_set 710 2
+acb-m-riot> param_set 710 0              # quiet again
+```
+
+Three things to know before you leave it on:
+
+* **It lives in NVS.** The level survives reboots and reflashes; a board you left at 2 last week
+  is still at 2.
+* **It takes about five seconds.** The level is cached because reading a parameter reaches NVS
+  every time, and doing that per packet would cost more than the tracing.
+* **It is UART-speed.** Level 2 on a 640-byte request is roughly 2 KB of output, about 170 ms at
+  115200. It prints from the dispatch task, never the zenoh read callbacks, so a slow console
+  cannot stall packet reception — but it is not free, and that is why it is off by default.
+
+### The Control Engine
+
+```bash
+cd ce-edgelink
+EDGELINK_DIAG=1 EDGELINK_TRACE=2 ./scripts/run-demo.sh
+tail -f /tmp/edgelink-diag.log
+```
+
+Both streams share one file on purpose: a packet dump is worth most read next to the decision it
+produced.
+
+```
+AUTH   peer=acbm-1cdbd4abbc7c result=OK (unlocked)
+REQ >> req/txn_40000000/acbm-1cdbd4abbc7c/svc/system.auth   79 bytes
+RES << res/txn_40000000/ce-a0ad9f5f8f2f/acbm-1cdbd4abbc7c/svc/system.auth   27 bytes
+```
+
+### Reading one exchange across all three
+
+```
+client  REQ  req/txn_b440d9e9/acbm-1cdbd4abbc7c/svc/system.auth                      74B
+board   REQ << req/txn_b440d9e9/acbm-1cdbd4abbc7c/svc/system.auth                    74 bytes
+board   RES >> res/txn_b440d9e9/ce-acf23c0d8637/acbm-1cdbd4abbc7c/svc/system.auth    27 bytes
+client  RES  res/txn_b440d9e9/ce-acf23c0d8637/acbm-1cdbd4abbc7c/svc/system.auth      27B  round trip 51 ms
+```
+
+Byte counts matching on both sides of every line is the cheap check that nothing is altered in
+transit. And the timings say something the client's own number does not: the board turns a
+request around in about **5 ms** while the client measures 50–350 ms. The difference is the
+client's per-request subscriber setup, not the board being slow.
+
+### Capturing the board's side without breaking the test
+
+**Opening the serial port resets the ESP32-S3** — the open toggles DTR/RTS — and the reset wipes
+the RAM-only device config. So a script that attaches the console mid-test does not observe the
+run: it restarts the board and throws away everything provisioned so far, and the next read comes
+back empty in a way that reads as "nothing configured".
+
+Open the console **first**, then provision, then drive. §12 has a capture that does it in that
+order.
+
+If you need to know whether the board restarted without opening the console at all, read
+`PointValue.src_ts_ms` — it is the device clock in milliseconds, so it climbing across two reads
+means the board stayed up.
 
 ---
 
