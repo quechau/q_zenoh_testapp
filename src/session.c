@@ -317,9 +317,20 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     st.seq = ctx->seq_next++;
     st.service = service;
 
+    /* Subscribe to exactly this call's reply. The board appends the transaction id to the ack
+     * key, so zenoh does the matching and no other reply is ever delivered here — with several
+     * calls in flight to one service the old shared key delivered every reply to every waiter,
+     * which each then had to filter.
+     *
+     * The trailing `/**` costs nothing (it matches zero or more chunks) and leaves room for
+     * the key to grow later. It does NOT make this tolerant of a board that publishes the bare
+     * `.../ack/<client_id>`: the seq chunk is required, so such a board's reply never matches
+     * and the wait times out — which the timeout message says outright rather than leaving as a
+     * mystery. The seq and service_id checks in on_ack stay regardless: the key is an
+     * optimisation, the envelope is the contract. */
     char ack_key[QZ_MAX_KEY], req_key[QZ_MAX_KEY];
-    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s",
-             ctx->board, service, ctx->client_id);
+    snprintf(ack_key, sizeof(ack_key), "rubix/%s/svc/%s/ack/%s/%u/**",
+             ctx->board, service, ctx->client_id, st.seq);
     snprintf(req_key, sizeof(req_key), "rubix/%s/svc/%s/req", ctx->board, service);
 
     /* Subscribe BEFORE publishing: the board answers in tens of milliseconds and a late
@@ -366,6 +377,10 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
          * (zero-timeout xQueueSend into a depth-8 queue), so a timeout does not necessarily
          * mean the request never arrived. */
         qz_log("REQ", "no ack within %us on %s", timeout_s, ack_key);
+        qz_log("HINT", "that key carries the transaction id. A board built before the id was "
+                       "added replies on rubix/%s/svc/%s/ack/%s with no trailing chunk, which "
+                       "this subscription cannot match — flash it, or subscribe .../ack/%s/**",
+               ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
     }
     qz_log("ACK", "%s %s  seq=%u  %zuB  round trip %llu ms", service, qz_op_name(op),

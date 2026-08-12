@@ -474,19 +474,25 @@ than dropped would produce exactly this. Not investigated further here.
 ### What pins what
 
 ```
-rubix/<board>/svc/<service>/ack/<client_id>
-      ───┬───     ───┬───       ────┬────
-     which board  which API   which consumer      ← the key separates these three
-                                                    at the routing layer
-
-RequestEnvelope.seq  ──echoed──▶  ResponseEnvelope.seq
-                                                    ← this separates WHICH CALL
+rubix/<board>/svc/<service>/ack/<client_id>/<seq>
+      ───┬───     ───┬───       ────┬────    ─┬─
+     which board  which API   which consumer  which call
 ```
 
-The key already keeps two boards, two services and two consumers apart — replies simply never
-reach the wrong subscriber. What the key does **not** separate is two calls from the same
-consumer to the same service. That is what `seq` is for: the request carries it, the board
-echoes it unchanged, and the pair is the transaction.
+All four now live in the key, so zenoh delivers a reply only to the caller waiting for it. It
+did not always: the key used to stop at `<client_id>`, so with several calls in flight to one
+service every waiter received every reply and kept the one whose `seq` matched. Correct, but
+each reply was delivered N times and filtered N−1 times.
+
+`seq` is still in the envelope, and it is still what makes a reply *yours* —
+`RequestEnvelope.seq` echoed back as `ResponseEnvelope.seq`. **The key is an optimisation; the
+envelope is the contract.** A consumer that skips the check because the key already matched is
+trusting a routing hint with correctness.
+
+**Subscribe with a trailing `**`.** It matches any number of chunks including zero, so
+`rubix/*/svc/*/ack/<client_id>/**` matches boards that append the id and boards that do not —
+which is what makes the two ends upgradable in either order. An exact key without it matches
+neither shape once the other ships, and the failure is silent: no error, no log, no replies.
 
 So a reply is yours only when the seq matches **and** the `service_id` is the one you asked for.
 This tool checks both. The second check is not redundant: the key is subscribed per request, but
@@ -548,26 +554,27 @@ altered in transit. Note also what the timings say: the board turns a request ar
 own work — it declares the ack subscriber per request and settles before publishing — not the
 board being slow. Measure the board with the board's clock.
 
-### Should the transaction id go in the key instead?
+### What the change touched
 
-It could: `…/ack/<client_id>/<seq>` would let each caller subscribe to exactly its own reply and
-let zenoh do the matching, with no filtering in the consumer at all. With many calls in flight
-that is a real saving — today every in-flight request from one consumer to one service receives
-**every** reply on that key and discards the ones that are not its own.
+Moving the id into the key is a contract change, so every producer and consumer had to move
+together — a consumer left on an exact old key receives nothing and says nothing about it:
 
-It is not free, and it is not this tool's decision to make:
+| | |
+|---|---|
+| `ACB-M app_zenoh.c` | publishes `…/ack/<client_id>/<seq>` |
+| `ce-edgelink zenoh_transport.cpp` | subscribes `rubix/*/svc/*/ack/<cid>/**` |
+| `ce-edgelink zenoh_peer_probe.cpp` | same |
+| `ce-mobile keysV1.ts` | `ackAll` gains `/**`; `ack(...)` takes an optional seq; `parseAckKey` returns it |
+| `ACB-M poc/zenoh-e2e/zprobe.py` | subscribes with `/**` |
+| this tool | subscribes to the exact `…/ack/<cid>/<seq>/**` — one call, one key |
+| `keyspace.md` | the peer-bus keys were not in the normative grammar at all; now they are |
 
-* it is a **contract change**. The board builds the ack key (`app_zenoh.c`), so firmware, the
-  Control Engine and every other consumer have to move together. A consumer subscribed to the
-  exact current key stops receiving anything.
-* it puts an unbounded, ever-changing token in the keyspace. Each request becomes a new key
-  expression to declare and route, where today one key per consumer per service is reused.
-* it does not remove the need for `seq` in the envelope — the contract still carries it, and a
-  reply still has to be checked, so the win is routing efficiency rather than correctness.
+The consumers went first, all tolerant, then the board. In that order nothing is broken at any
+point, in either direction, whichever end is flashed or deployed first.
 
-The correctness problem is already solved by the field. If the fan-out cost shows up in
-measurement — many consumers, many concurrent calls — the key is where to fix it, and the change
-belongs in the contract rather than in one tool.
+This tool takes the exact key rather than the tolerant one, because demonstrating the isolation
+is the point. Against a board that predates the change it will simply time out — so the timeout
+says so, and names the key such a board would have used.
 
 ---
 
