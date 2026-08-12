@@ -439,35 +439,52 @@ relinquished — see §4.
 
 ---
 
-## 10. A defect this testing found, still open
+## 10. `seq_no` does not mean "the value changed"
 
-On the ZC-Damper's alive register — a constant, `0xD111` — the polled value **alternates between
-53521 and 0 while `quality` stays `Q_GOOD`**:
+`PointValue.seq_no` is documented as a per-point monotonic counter and the authority for
+last-writer-wins, and the board does bump it only inside a COV gate:
 
+```c
+const bool b_changed = pstru_point->b_dirty_first || (b_ok != pstru_point->b_last_valid) ||
+                       (b_ok && (flt_value != pstru_point->flt_last_value));
+if (!b_changed) continue;
+...
+pstru_point->u64_seq_no++;
 ```
-points modbus read 201     seq_no 10   (no value → 0)
-points modbus read 201     seq_no 12   (no value → 0)
-points modbus read 201     seq_no 14   (no value → 0)
-points modbus read 201     seq_no 20   value 53521
-points modbus read 201     seq_no 25   value 53521
-```
 
-`seq_no` is per-point and bumps on every change, so it climbing steadily is the board telling
-you the value really is flipping, not that the read is stale. A register that cannot change is
-changing.
+So it looks like proof that a value moved. It is not, because of the first term. When a notify
+publish fails the board calls `v_ZMB_Mark_All_Dirty()` to re-arm — deliberately, so values are
+not silently lost — and that sets `b_dirty_first` on **every** point. The next tick therefore
+counts every point as changed and bumps every `seq_no`, with nothing on the field bus having
+moved at all.
 
-This matters more than a fault would: `Q_FAULT` tells a consumer to disregard the value, while
-`Q_GOOD` with a zero invites it to act on one. Any control loop reading this point sees the
-damper alive, then dead, then alive.
+Measured: `zcd-alive` is the ZC-Damper's constant `0xD111`. Across six reads in six sessions its
+`seq_no` climbed 3 → 7 while the value never left 53521. Four reads inside **one** session left
+it at 10. It tracks sessions, not values, because a session ending is what makes the next publish
+fail.
 
-It is worse with more points provisioned on the same device, and a single point alone reads
-53521 for long stretches — which points at the transaction/response pairing rather than at the
-slave. `zenoh_modbus.c` already carries a comment about a late response landing on the *next*
-transaction and failing its address check; a mis-paired response being published as good rather
-than dropped would produce exactly this. Not investigated further here.
+**For a consumer this means:** use `seq_no` for last-writer-wins ordering, which is what the
+contract defines it for. Do not use it as a change indicator, and do not derive a rate of change
+from it. A climbing `seq_no` on a value that cannot change is expected here, not a fault.
 
+### An observation that did not survive re-testing
 
----
+An earlier revision of this section reported a defect: several points reading `Q_GOOD` with an
+absent value (zero) on registers that were known-good, which looked like a mis-paired Modbus
+response being published as good rather than dropped. That claim rested on the `seq_no`
+reasoning above, and the reasoning was wrong.
+
+The zero readings were real and are recorded here rather than deleted — they happened while the
+device definition was being re-upserted repeatedly with different line rates (19200/PAR_ODD,
+then 9600/PAR_EVEN, then 38400/PAR_NONE), and changing a device's line settings invalidates
+every point provisioned under it. With the device left alone at the ZC-Damper's actual
+38400-8-N-1, none of it reproduces: a freshly provisioned point reads 53521 immediately, four
+points on one device all read plausible values, and forty seconds of idle produce no phantom COV
+events on the console.
+
+So: not a confirmed defect, and not evidence of one. What it does illustrate is that a wrong
+line rate does not necessarily present as `Q_FAULT` — worth knowing when a point looks healthy
+and reads nonsense.
 
 ## 11. Telling concurrent calls apart
 
