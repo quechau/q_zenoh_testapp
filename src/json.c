@@ -40,9 +40,46 @@ static const qz_name_t SUPPORTED[] = {
     {6, "is_simulated"}, {7, "swappable"}, {0, NULL}
 };
 
+/* rubix.embedded.v1.ErrorInfo — the field every failed reply carries and the one this tool
+ * used to print as two raw bytes. */
+static const qz_name_t ERRORINFO[] = { {1, "code"}, {2, "message"}, {3, "detail"}, {0, NULL} };
+
+/** ErrorCode names, so a verdict reads as a reason rather than a number. */
+const char *qz_error_name(uint64_t code)
+{
+    switch (code) {
+        case 0: return "ERROR_OK";
+        case 1: return "ERROR_UNSUPPORTED";
+        case 2: return "ERROR_BAD_REQUEST";
+        case 3: return "ERROR_STATE";
+        case 4: return "ERROR_PERMISSION";
+        case 5: return "ERROR_TIMEOUT";
+        case 6: return "ERROR_HARDWARE";
+        case 7: return "ERROR_INTERNAL";
+        default: return "ERROR_?";
+    }
+}
+
+/* The envelopes themselves. Note they are NOT symmetric: a request carries its payload in
+ * field 8, a response in field 6. */
+static const qz_name_t REQ_ENV[] = {
+    {1, "wire_version"}, {2, "service_id"}, {3, "op"}, {4, "seq"}, {5, "client_id"},
+    {6, "deadline_ms"}, {7, "encoding"}, {8, "payload"}, {0, NULL}
+};
+static const qz_name_t RSP_ENV[] = {
+    {1, "wire_version"}, {2, "service_id"}, {3, "op"}, {4, "seq"}, {5, "encoding"},
+    {6, "payload"}, {7, "error"}, {8, "is_notification"}, {0, NULL}
+};
+
+/* Which payload table to descend into, chosen by service id before rendering. */
+static const qz_name_t *g_payload_names = NULL;
+
 /** Which table applies one level down from `names` at `field`. */
 static const qz_name_t *descend(const qz_name_t *names, uint32_t field)
 {
+    if (names == REQ_ENV && field == 8) return g_payload_names;
+    if (names == RSP_ENV && field == 6) return g_payload_names;
+    if (names == RSP_ENV && field == 7) return ERRORINFO;
     if (names == BOARDINFO_RESPONSE && field == 1) return BOARDINFO;
     if (names == BOARDINFO && field >= 9 && field <= 11) return SUPPORTED;
     return names;
@@ -130,8 +167,8 @@ static void render_value(uint32_t field, uint32_t wt, const uint8_t *b, size_t l
             return;
         }
         printf("\"");
-        for (size_t i = 0; i < len && i < 64; i++) printf("%02x", b[i]);
-        printf("%s\"", len > 64 ? "…" : "");
+        for (size_t i = 0; i < len; i++) printf("%02x", b[i]);   /* all of it, never a preview */
+        printf("\"");
         return;
     }
     printf("null");
@@ -159,12 +196,17 @@ static void render(const uint8_t *b, size_t len, const qz_name_t *names, int dep
         if (wt == 0) {
             uint64_t v;
             if (!read_varint(b, len, &i, &v)) break;
-            printf("%llu", (unsigned long long)v);
+            /* An ErrorCode is the one varint worth spelling out: "code": 4 is a lookup the
+             * reader has to do by hand, and the raw number is still in the hex above. */
+            if (names == ERRORINFO && field == 1) printf("\"%s\"", qz_error_name(v));
+            else printf("%llu", (unsigned long long)v);
         } else if (wt == 2) {
             uint64_t l;
             if (!read_varint(b, len, &i, &l)) break;
             if (i + l > len) break;
-            render_value(field, wt, b + i, (size_t)l, descend(names, field), depth, indent);
+            /* A zero-length ErrorInfo is an absent error, not an empty string. */
+            if (l == 0 && names == RSP_ENV && field == 7) printf("{}");
+            else render_value(field, wt, b + i, (size_t)l, descend(names, field), depth, indent);
             i += l;
         } else if (wt == 5) { i += 4; printf("null"); }
         else if (wt == 1)   { i += 8; printf("null"); }
@@ -173,14 +215,42 @@ static void render(const uint8_t *b, size_t len, const qz_name_t *names, int dep
     printf("\n");
 }
 
-void qz_json_dump(const uint8_t *buf, size_t len, const char *service, const char *indent)
-{
-    /* Only the payload is rendered: the envelope itself is already printed field by field, and
-     * repeating it as JSON would say nothing new. */
-    const qz_name_t *names = NULL;
-    if (service != NULL && strcmp(service, "system.boardinfo") == 0) names = BOARDINFO_RESPONSE;
 
-    printf("%s{\n", indent);
-    render(buf, len, names, 1, indent);
+
+/** The one call a caller needs: the packet exactly as it goes on the wire, then what it says.
+ *
+ * Both views, both directions. The hex is the only record of what was actually transmitted —
+ * a decoder can be wrong, and this project has already had one that was, silently putting a
+ * payload in the field a request reserves for `encoding`. The JSON is what makes 141 bytes of
+ * nested protobuf mean something. */
+static void dump_hex(const uint8_t *buf, size_t len, const char *indent)
+{
+    printf("%sencoded (%zu B)\n", indent, len);
+    for (size_t i = 0; i < len; i++) {                 /* every byte, never a preview */
+        if (i % 32 == 0) printf("%s  ", indent);
+        printf("%02x", buf[i]);
+        printf("%s", ((i + 1) % 32 == 0 || i + 1 == len) ? "\n" : " ");
+    }
+}
+
+static void dump_json(const uint8_t *buf, size_t len, bool is_response, const char *indent)
+{
+    printf("%sjson\n%s{\n", indent, indent);
+    render(buf, len, is_response ? RSP_ENV : REQ_ENV, 1, indent);
     printf("%s}\n", indent);
+}
+
+void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *service,
+                    const char *indent)
+{
+    g_payload_names = NULL;
+    if (service != NULL && strcmp(service, "system.boardinfo") == 0)
+        g_payload_names = BOARDINFO_RESPONSE;
+
+    /* Ordered the way each direction actually happens, so the listing reads as the sequence of
+     * events rather than as two unrelated views: a request is composed and then encoded, a
+     * response arrives encoded and is then decoded. */
+    if (!is_response) { dump_json(buf, len, false, indent); dump_hex(buf, len, indent); }
+    else              { dump_hex(buf, len, indent); dump_json(buf, len, true, indent); }
+    g_payload_names = NULL;
 }

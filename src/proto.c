@@ -83,49 +83,6 @@ int qz_req_encode(uint8_t *buf, size_t buf_len, const char *service_id, qz_op_t 
     return (int)n;
 }
 
-void qz_envelope_dump(const uint8_t *buf, size_t len, bool is_response, const char *indent)
-{
-    const char **names = is_response ? RSP_FIELDS : REQ_FIELDS;
-    size_t names_n = is_response ? (sizeof(RSP_FIELDS) / sizeof(*RSP_FIELDS))
-                                 : (sizeof(REQ_FIELDS) / sizeof(*REQ_FIELDS));
-    size_t i = 0;
-    while (i < len) {
-        uint64_t key;
-        if (!get_varint(buf, len, &i, &key)) break;
-        uint32_t field = (uint32_t)(key >> 3);
-        uint32_t wt    = (uint32_t)(key & 7);
-        const char *name = (field < names_n) ? names[field] : NULL;
-        char fallback[24];
-        if (name == NULL) { snprintf(fallback, sizeof(fallback), "field%u", field); name = fallback; }
-
-        if (wt == 0) {
-            uint64_t v;
-            if (!get_varint(buf, len, &i, &v)) break;
-            printf("%s%-14s = %llu\n", indent, name, (unsigned long long)v);
-        } else if (wt == 2) {
-            uint64_t l;
-            if (!get_varint(buf, len, &i, &l)) break;
-            if (i + l > len) break;
-            /* Printable runs are shown as text; anything else as a short hex preview, so a
-             * nested protobuf payload is still recognisable without decoding it. */
-            bool printable = (l > 0);
-            for (uint64_t k = 0; k < l; k++) {
-                uint8_t c = buf[i + k];
-                if (c < 0x20 || c > 0x7E) { printable = false; break; }
-            }
-            if (printable) {
-                printf("%s%-14s = %.*s\n", indent, name, (int)l, (const char *)(buf + i));
-            } else {
-                printf("%s%-14s = <%llu B>", indent, name, (unsigned long long)l);
-                for (uint64_t k = 0; k < l && k < 24; k++) printf(" %02x", buf[i + k]);
-                printf("%s\n", l > 24 ? " …" : "");
-            }
-            i += l;
-        } else if (wt == 5) { i += 4; printf("%s%-14s = <fixed32>\n", indent, name); }
-        else if (wt == 1)   { i += 8; printf("%s%-14s = <fixed64>\n", indent, name); }
-        else { printf("%s<unknown wire type %u>\n", indent, wt); break; }
-    }
-}
 
 bool qz_field_varint(const uint8_t *buf, size_t len, uint32_t field, uint64_t *out)
 {

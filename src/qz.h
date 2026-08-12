@@ -87,11 +87,16 @@ int qz_req_encode(uint8_t *buf, size_t buf_len, const char *service_id, qz_op_t 
                   const uint8_t *payload, size_t payload_len);
 
 /** Prints every top-level field of an envelope, naming the ones we know. */
-void qz_envelope_dump(const uint8_t *buf, size_t len, bool is_response, const char *indent);
 
 /** Renders a protobuf message as readable JSON. Field names are known for a few payload
  *  types; the rest keep their field number, so the output never invents a label. */
-void qz_json_dump(const uint8_t *buf, size_t len, const char *service, const char *indent);
+
+/** Prints a packet twice: the bytes exactly as sent, then the same thing as JSON. */
+void qz_packet_dump(const uint8_t *buf, size_t len, bool is_response, const char *service,
+                    const char *indent);
+
+/** Renders an ErrorInfo and names its code. */
+const char *qz_error_name(uint64_t code);
 
 /** Copies out a length-delimited field. Returns its length, or 0 when absent. */
 size_t qz_field_bytes(const uint8_t *buf, size_t len, uint32_t field,

@@ -7,33 +7,42 @@ same protobuf envelopes, the same key expressions. What it proves about a board 
 what a real consumer would experience — not what a differently-built client happens to do.
 
 ```
-q> discover
-  acbm-1cdbd4abbc7c    7 announces   nonce 2d1aebe04a842687579d0a34b2d08656
 q> login <password>
-  ACK  seq=20840  25B  round trip 51 ms
-        error          = <0 B>
-q> boardinfo
-  ACK  seq=21191  172B  round trip 101 ms
-        payload        = <141 B> 0a 8a 01 0a 05 41 43 42 2d 4d …
-  JSON system.boardinfo payload decoded
-        {
-          "info": {
-            "board_name": "ACB-M",
-            "chip_type": "esp32s3",
-            "firmware_version": "0.2.0.0",
-            "supported_transports": { "id": "transport.zenoh", "version": "1.9.0" }
-          }
-        }
+  REQ  rubix/acbm-1cdbd4abbc7c/svc/system.auth/req  72B  seq=34167
+        json
+        { "wire_version": 1, "service_id": "system.auth", "op": 5, "seq": 34167,
+          "client_id": "ce-acf23c0d8637", "payload": "d1a7d9c0…95a7faca" }
+        encoded (72 B)
+          08 01 12 0b 73 79 73 74 65 6d 2e 61 75 74 68 18 05 20 f7 8a 02 2a 0f 63 65 …
+  ACK  seq=34167  27B  round trip 51 ms
+        encoded (27 B)
+          08 01 12 0b 73 79 73 74 65 6d 2e 61 75 74 68 18 05 20 be cc 01 28 01 3a 02 08 04
+        json
+        { …, "error": { "code": "ERROR_PERMISSION" } }
+  ACK   FAILED — ERROR_PERMISSION (code 4)
+  AUTH  DENIED. Either the password is wrong, or the nonce is stale …
 ```
 
-Every reply is shown twice: the envelope field by field, which is the wire truth, and then the
-payload rendered as JSON, which is what it means. A `system.boardinfo` answer is 141 bytes of
-nested protobuf and a hex preview of it says nothing.
+Every packet is shown in both forms, ordered the way that direction actually happens: a
+request is composed as JSON and then encoded; a reply arrives encoded and is then decoded.
+The hex is the only record of what really went on the wire — a decoder can be wrong, and one
+here was, silently writing a payload into the field a request reserves for `encoding`. The
+JSON is what makes 172 bytes of nested protobuf mean something.
+
+**Byte fields print in full.** No previews, no `…`. The bytes a preview cuts are reliably the
+ones that turn out to matter.
+
+**A failed reply says why.** `ResponseEnvelope` field 7 is an `ErrorInfo`, not a number, so
+reading it as a varint finds nothing and the failure prints as two anonymous bytes. It is
+decoded and its code named, and commands report a verdict — `UNLOCKED` or `DENIED` with the
+three things that actually cause it — instead of describing how to interpret one. An earlier
+version printed "a zero error code above means unlocked" whatever came back, so a refused
+login looked exactly like a successful one.
 
 The JSON renderer has no generated code and no schema at run time. Varints print as numbers,
 printable byte strings as strings, and anything else is re-parsed as a nested message and
 printed as an object if it parses cleanly to the last byte. Field *names* come from small
-tables for the payloads worth naming; a field with no entry keeps its number, so the output
+tables for the messages worth naming; a field with no entry keeps its number, so the output
 never invents a label it cannot justify.
 
 ## Build
@@ -162,7 +171,7 @@ src/session.c   zenoh session, discovery, pub/sub, login, request/reply
 src/proto.c     protobuf encode/decode for the rubix envelopes (no protoc needed)
 src/ca.c        CA enrolment over HTTPS: register, key, CSR, sign
 src/mdns.c      finding boards: mDNS for the name, TCP sweep for the address
-src/json.c      protobuf rendered as readable JSON, inferred rather than generated
+src/json.c       protobuf rendered as readable JSON, inferred rather than generated
 src/logfilter.c keeps zenoh-pico's chatter out of the way unless --debug
 src/util.c      hashing, base64, certificate CN
 proto/          envelope.proto, for reference

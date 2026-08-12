@@ -207,7 +207,7 @@ static void on_any(z_loaned_sample_t *sample, void *arg)
     }
     qz_log("RECV", "[%u] %.*s  %zuB", st->count, (int)z_string_len(z_loan(ks)),
            z_string_data(z_loan(ks)), n);
-    if (st->dump && d != NULL && n > 0) qz_envelope_dump(d, n, true, "              ");
+    if (st->dump && d != NULL && n > 0) qz_packet_dump(d, n, true, NULL, "              ");
     if (d != NULL) z_drop(z_move(slice));
 }
 
@@ -320,7 +320,7 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     if (blen < 0) { z_drop(z_move(sub)); qz_log("ERR", "envelope too large"); return -1; }
 
     qz_log("REQ", "%s  %dB  seq=%u", req_key, blen, st.seq);
-    qz_envelope_dump(body, (size_t)blen, false, "              ");
+    qz_packet_dump(body, (size_t)blen, false, service, "              ");
 
     z_view_keyexpr_t req_ke;
     z_view_keyexpr_from_str(&req_ke, req_key);
@@ -348,20 +348,18 @@ int qz_request(qz_ctx_t *ctx, const char *service, qz_op_t op,
     }
     qz_log("ACK", "seq=%u  %zuB  round trip %llu ms", st.seq, st.reply_len,
            (unsigned long long)(qz_now_ms() - st.sent_ms));
-    qz_envelope_dump(st.reply, st.reply_len, true, "              ");
+    qz_packet_dump(st.reply, st.reply_len, true, service, "              ");
 
-    /* The wire dump above proves what arrived; this says what it means. A boardinfo answer is
-     * 141 bytes of nested protobuf, and as a hex preview it tells the reader nothing. */
-    const uint8_t *rsp_payload = NULL;
-    size_t plen = qz_field_bytes(st.reply, st.reply_len, 6, &rsp_payload); /* response payload */
-    if (plen > 0) {
-        qz_log("JSON", "%s payload decoded", service);
-        qz_json_dump(rsp_payload, plen, service, "              ");
+    /* Field 7 of a ResponseEnvelope is an ErrorInfo message, not a number. Printing its two
+     * raw bytes said nothing; decoding it turns "<2 B> 08 04" into ERROR_PERMISSION. */
+    const uint8_t *errbuf = NULL;
+    size_t elen = qz_field_bytes(st.reply, st.reply_len, 7, &errbuf);
+    uint64_t code = 0;
+    if (elen > 0) (void)qz_field_varint(errbuf, elen, 1, &code);
+    if (code != 0) {
+        qz_log("ACK", "FAILED — %s (code %llu)", qz_error_name(code), (unsigned long long)code);
+        return -(int)code;
     }
-
-    uint64_t err = 0;
-    if (qz_field_varint(st.reply, st.reply_len, 7, &err) && err != 0)
-        qz_log("ACK", "error code %llu", (unsigned long long)err);
     return 0;
 }
 
@@ -398,11 +396,22 @@ int qz_login(qz_ctx_t *ctx, const char *password)
     qz_log("AUTH", "nonce=%s client=%s", nonce, ctx->client_id);
     qz_log("AUTH", "proof=%s", proofhex);
 
-    if (qz_request(ctx, "system.auth", QZ_OP_EXECUTE, proof, sizeof(proof), 10) != 0) {
-        qz_log("AUTH", "no verdict from the board");
-        return -1;
+    /* Report the verdict rather than describing how to read one. An earlier version printed
+     * "a zero error code above means unlocked" whatever came back, so a refused login looked
+     * like a successful one. */
+    int rc = qz_request(ctx, "system.auth", QZ_OP_EXECUTE, proof, sizeof(proof), 10);
+    if (rc == 0) {
+        ctx->logged_in = true;
+        qz_log("AUTH", "UNLOCKED as %s", ctx->client_id);
+        return 0;
     }
-    ctx->logged_in = true;
-    qz_log("AUTH", "sent; a zero error code above means unlocked");
-    return 0;
+    ctx->logged_in = false;
+    if (rc == -4) {                       /* ERROR_PERMISSION */
+        qz_log("AUTH", "DENIED. Either the password is wrong, or the nonce is stale — it "
+                       "changes on every board reboot, so run `discover` again — or the "
+                       "certificate CN does not match client_id '%s'.", ctx->client_id);
+    } else {
+        qz_log("AUTH", "no verdict from the board");
+    }
+    return -1;
 }
