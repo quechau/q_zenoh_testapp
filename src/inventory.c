@@ -4,11 +4,11 @@
  * tool when you are debugging the wire, and the wrong one when the question is operational:
  * which points exist, which device each belongs to, and which of them you may write.
  *
- * The question matters more here than in most systems, because the answer is not stored
- * anywhere else. A board's device and point configuration lives in RAM: it does not survive a
- * reboot, and the host re-syncs it on connect. So the board is the only authority on what it is
- * currently holding, and after any restart — including the one caused by opening its console —
- * this is how you find out what is actually there rather than what you provisioned earlier.
+ * The board is the authority on this, not the host: it is the only thing that knows what it
+ * actually applied, as opposed to what someone tried to provision. Since ADR-024 the board also
+ * keeps that config across a reboot, so this answers a second question it could not answer
+ * before — whether a board came back holding what it held, or came back empty. Each plane's
+ * line carries the board's config fingerprint for exactly that comparison.
  *
  * Nothing here knows a Modbus register from a BACnet object. The three config planes are walked
  * with the generated contract schema, so a field added to the contract appears here without a
@@ -27,14 +27,18 @@
 
 typedef struct {
     const char *proto;          /* "modbus" / "bacnet" / "lora" */
+    const char *config_msg;     /* the snapshot itself, for its config_hash */
     const char *device_msg;     /* fully qualified, because PointDef exists in three packages */
     const char *point_msg;
 } plane_t;
 
 static const plane_t PLANES[] = {
-    { "modbus", "rubix.embedded.modbus.v1.ModbusDeviceDef", "rubix.embedded.modbus.v1.ModbusPointDef" },
-    { "bacnet", "rubix.embedded.bacnet.v1.BacnetDeviceDef", "rubix.embedded.bacnet.v1.BacnetPointDef" },
-    { "lora",   "rubix.embedded.lora.v1.LoraDeviceDef",     "rubix.embedded.lora.v1.LoraPointDef" },
+    { "modbus", "rubix.embedded.modbus.v1.ModbusConfig",
+      "rubix.embedded.modbus.v1.ModbusDeviceDef", "rubix.embedded.modbus.v1.ModbusPointDef" },
+    { "bacnet", "rubix.embedded.bacnet.v1.BacnetConfig",
+      "rubix.embedded.bacnet.v1.BacnetDeviceDef", "rubix.embedded.bacnet.v1.BacnetPointDef" },
+    { "lora",   "rubix.embedded.lora.v1.LoraConfig",
+      "rubix.embedded.lora.v1.LoraDeviceDef",     "rubix.embedded.lora.v1.LoraPointDef" },
 };
 
 static bool read_varint(const uint8_t *b, size_t len, size_t *i, uint64_t *out)
@@ -245,7 +249,14 @@ int qz_inventory(qz_ctx_t *ctx)
             continue;
         }
 
-        printf("  %s\n", plane->proto);
+        /* ADR-024: the board's config fingerprint. Printed because it is the fastest way to
+         * answer "did this board keep its config across that reboot?" — take it before, take
+         * it after, compare by eye. It is opaque: equal means the same stored config, and
+         * nothing else can be read out of it. Empty means firmware without persistence. */
+        char fp[32] = "";
+        field_str(qz_msg_find(plane->config_msg), reply, reply_len, "config_hash", fp, sizeof fp);
+        printf("  %-7s %s\n", plane->proto, fp[0] ? fp : "(not persisted)");
+
         device_ctx_t dc = { plane, qz_msg_find(plane->device_msg), qz_msg_find(plane->point_msg),
                             reply, reply_len, 0 };
         each_entry(reply, reply_len, FIELD_DEVICES, print_device, &dc);
