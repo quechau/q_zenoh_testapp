@@ -409,7 +409,11 @@ the function code, not a label. After a reboot the board homes all ten dampers s
 2.5–5 minutes before anything responds sensibly, and a stroke takes ~15 s, so a read-back of a
 target must wait.
 
-### Modbus — DDM18SD energy meter (9600-8-E-1)
+### Modbus — DDM18SD energy meter (9600-8-E-1) — not on the bench
+
+> The meter is not wired up at the moment, so this profile is written from
+> `ACB-M/docs/Modbus-Module/ddm18sd-energy-meter-test` and has not been run over zenoh. It is
+> kept because it is the case that justifies per-device line settings.
 
 ```bash
 ./scripts/test-services.sh modbus --device ddm18sd
@@ -502,6 +506,23 @@ when the register was never read is indistinguishable from a damper genuinely cl
 The fix belongs in the modbus master, not in the contract: quality must reflect the last
 transaction for that point, not the reachability of the slave that owns it.
 
+### Provisioning does not survive a reboot, and opening the console causes one
+
+There is no persistence code in `zenoh_modbus.c` — the devices and points a consumer provisions
+live in RAM. A board restart clears them, and the host re-syncs on connect, which is what the
+CE's `SYNC svc=modbus.config outcome=0` line right after `AUTH` actually is.
+
+That matters for testing because **opening the board's serial port reboots the ESP32-S3** (the
+open toggles DTR/RTS). So a capture script that attaches the console mid-test does not observe
+the run — it restarts the board and wipes everything provisioned so far, and the next read comes
+back with an empty payload that looks like "no points configured".
+
+Measured: a config read immediately after attaching the console returned no payload at all,
+with device 11 and its points provisioned less than a minute earlier.
+
+Take the board-side capture in a separate run from the provisioning, or accept that the trace
+starts from a blank board.
+
 ### The ZC-Damper register map is not hardware-verified
 
 `ACB-M/docs/Modbus-Module/zc-damper-control-test` says so itself — its values are derived from
@@ -513,6 +534,14 @@ invalid` on every poll, with a single point provisioned and nothing else on the 
 So a write to it is `accepted` — that is the device cache accepting it, which the contract is
 explicit about — and nothing reads back. Do not treat the damper half of that document as
 verified until someone runs it.
+
+Later in the same session the damper stopped answering altogether: the alive register that had
+read `53521` reliably returned nothing, with RS485-1 still `38400-8-N-1` and its role still
+Modbus master (`0x0250`, `0x0241` read back from the console). Whatever changed is on the wire
+or in the device, not in the configuration.
+
+Which makes it the cleanest demonstration of the defect above: the port is right, the device is
+unreachable, and the point still reports **`Q_GOOD`**. A consumer has no way to tell.
 
 ## 11. Telling concurrent calls apart
 
