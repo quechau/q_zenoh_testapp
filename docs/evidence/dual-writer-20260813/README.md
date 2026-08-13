@@ -43,3 +43,26 @@ and the refusal can relax.
 
 Bench state restored: factory default flow on the board, host loop is the single writer, AC
 follows the sheet threshold as before.
+
+## Final hop (later the same day): the register never "reverts" — it answers honestly
+
+The operator confirmed the value arrives at the support board's UART, deleted the sheet link
+and set the point directly — still "reverted". The slave source (read-only copy under
+`sample-sources/ACB-M`) closes the case:
+
+```cpp
+READ  POWER → getUartPowerState() → hvac_get_current_state()->power_state  // the AC's ACTUAL state
+WRITE POWER → setUartPowerState() → "Set UART power: ON" → hvac_write_power_state(1)  // a COMMAND
+```
+
+The register is **command-in / actual-state-out**. The log line the operator saw ("Set UART
+power: ON") is the command being accepted and queued; the subsequent reads return the real
+machine's state. Measured live via a temporary point on the connection-status register:
+
+```
+MBCTL_FGA_UART_CONN_STATUS (internal 40007, RO)  =  0   ← AC not connected
+```
+
+So: command accepted → AC absent → actual state stays 0 → every read reports 0. Nothing in
+the stack reverts anything; the readback is the truth about the hardware. Fix is physical:
+restore the FGA UART link / AC power, confirm reg 40007 reads 1, then POWER writes will hold.
