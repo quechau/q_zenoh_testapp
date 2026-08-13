@@ -1,0 +1,14 @@
+{
+  "flow_id": 1,
+  "nodes": [
+    {"uid": 100, "type": "lora-droplet",   "props": {"dev_addr": "6CC06351"}},
+    {"uid": 200, "type": "compare-greater","props": {"default_term2": 100.0}},
+    {"uid": 300, "type": "modbus-write",   "props": {"port": "rs485-1", "slave": 1,
+      "register": "ao", "address": 40001, "data_type": "u16", "endian": "abcd",
+      "timeout_ms": 3000, "refresh_ms": 2000}}
+  ],
+  "wires": [
+    {"src": 100, "src_pin": "temp",   "dst": 200, "dst_pin": "value"},
+    {"src": 200, "src_pin": "result", "dst": 300, "dst_pin": "value"}
+  ]
+}

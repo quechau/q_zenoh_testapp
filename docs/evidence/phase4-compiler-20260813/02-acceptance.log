@@ -1,0 +1,18 @@
+== host stopped: 0 CE processes ==
+== A. register before (slave 1, power) ==
+   reg=0
+== B. deploy interlock-on (temp > -5 => write 1) ==
+q> [  6.125s] FLOW     /tmp/claude-1000/-home-fw-qs-repos-no-5/063b0ceb-d27d-4196-883e-349c135b0813/scratchpad/interlock-on.riot: 78 bytes sha=b2d6915546b5d7ff… (1 chunks)
+[  7.729s] FLOW     committed — board persists and restarts in 3 s to load it
+q>   flow: sha=b2d6915546b5d7ff7748b0dc2b7f7758cd9d47baec3b334d3be91fa7475fa979
+        running=yes  nodes=3  received=0
+   reg=1  (expect 1 — the compiled flow wrote it, no host anywhere)
+== C. deploy interlock-off (temp > 100 => write 0) ==
+[  7.795s] FLOW     committed — board persists and restarts in 3 s to load it
+q>   flow: sha=7ceefdfdb784f3af1cf40b8737fae557a16e74180c68e49331c311401bf11118
+        running=yes  nodes=3  received=0
+   reg=0  (expect 0)
+== D. restore factory default flow ==
+[  7.770s] FLOW     committed — board persists and restarts in 3 s to load it
+q>   flow: sha=502a68b30475bf21cc580d03e96efa44c34893c195df8975a67b6c1dbcb4ac6d
+        running=yes  nodes=0  received=0
