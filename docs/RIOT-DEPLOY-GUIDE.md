@@ -123,14 +123,22 @@ client: `flow status` shows the compiled sha, `running=yes nodes=3`, and the flo
 register still answers (`points modbus read`). That sentence — *the logic runs when the host
 does not* — is the whole point; if it fails, nothing else matters.
 
-### 3.4 Resilience (run after risky changes)
+### 3.4 Adversarial suite (run before calling anything stable)
+
+`docs/evidence/bughunt-e2e-20260813/bughunt.py` attacks every board path a polite test never
+touches: kill an upload mid-flight (`flow put big.riot --slow`, then kill the client),
+begin-over-begin, the 60 s abandon timeout, a clean commit straight after the mess, and a put
+fired into another commit's reboot window. Pass = every failure **named**, no unexplained
+reset, no residue in the next commit. All held on 2026-08-13.
+
+### 3.5 Resilience (run after risky changes)
 
 `ce-edgelink/docs/evidence/resilience-e2e-20260813/` is the template: reboot the CE (expect
 one full push — a fresh process has no syncedHost), reboot the board with the CE untold
 (expect **0** config writes, fingerprints identical, cards re-seeded, flow sha unchanged).
 Count on the **board's console** — it is the only witness that cannot be talked out of it.
 
-### 3.5 Evidence discipline (the process that keeps paying)
+### 3.6 Evidence discipline (the process that keeps paying)
 
 Per phase: a folder under `docs/evidence/<phase>-<date>/` with the raw logs (both sides),
 screenshots for anything UI, a README that states what was measured — **including what went
@@ -141,7 +149,7 @@ is how confidence rots.
 
 ---
 
-## 3.6 When a deploy fails — the recovery ladder
+## 3.7 When a deploy fails — the recovery ladder
 
 Every failure mode leaves the board in a **known** state; work down the ladder, never guess:
 
