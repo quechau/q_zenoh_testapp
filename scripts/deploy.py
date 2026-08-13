@@ -35,7 +35,10 @@ WORK = "/tmp/riot-deploy"
 
 
 def sh(args, **kw):
-    return subprocess.run(args, capture_output=True, text=True, timeout=240, **kw)
+    # stderr merged into stdout: a child's traceback must reach the door's log, or the widget
+    # shows a bare ERROR with an empty log — the exact silence this pipeline exists to end.
+    return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, timeout=240, **kw)
 
 
 def board_status():

@@ -47,7 +47,12 @@ def get(path):
 
 
 def node(uid):
-    n = get(f"nodes/uid/{uid}")["nodes"][0]
+    try:
+        n = get(f"nodes/uid/{uid}")["nodes"][0]
+    except Exception as e:
+        # A deleted component is the single most common way a stored selection goes stale —
+        # measured: the operator deleted edgeLoraInput and the widget could only say "ERROR".
+        refuse(f"component {uid} no longer exists in the graph ({e}) — update the selection")
     props = {k: v.get("value") for k, v in n["properties"].items()}
     return {"uid": n["uid"], "type": n["type"].split("::")[-1], "parent": n["parent"],
             "name": n["name"], "props": props}
