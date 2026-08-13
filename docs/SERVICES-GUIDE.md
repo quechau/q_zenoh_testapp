@@ -1278,6 +1278,8 @@ write fails rather than discovered later by a board that came back empty.
 
 ## Related
 
+* [`RIOT-DEPLOY-GUIDE.md`](RIOT-DEPLOY-GUIDE.md) — flows on the board: wiring across sheets,
+  compile, the Deploy button, testing and troubleshooting
 * `control-engine-docs/Contracts/proto-contracts/proto` — the contract this tool builds against
   when a checkout sits beside it (CMake says which source it used). [`../proto/`](../proto) is a
   bundled fallback for standalone builds and can lag — it did, and a board field this tool had
