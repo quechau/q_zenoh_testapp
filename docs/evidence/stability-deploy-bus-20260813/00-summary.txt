@@ -1,0 +1,27 @@
+console open (dev board resets once); waiting boot
+=== baseline bus soak (CE live, no deploys) ===
+  point 100155: 6/6 Q_GOOD
+  point 100158: 6/6 Q_GOOD
+  point 100170: 6/6 Q_GOOD
+=== deploy cycle 1/5: interlock-on.riot ===
+  commit=True sha=b2d6915546b5d7ff running=yes nodes=3 bus 12/12 Q_GOOD
+=== deploy cycle 2/5: interlock-off.riot ===
+  commit=True sha=7ceefdfdb784f3af running=yes nodes=3 bus 12/12 Q_GOOD
+=== deploy cycle 3/5: interlock-on.riot ===
+  commit=True sha=b2d6915546b5d7ff running=yes nodes=3 bus 12/12 Q_GOOD
+=== deploy cycle 4/5: interlock-off.riot ===
+  commit=True sha=7ceefdfdb784f3af running=yes nodes=3 bus 12/12 Q_GOOD
+=== deploy cycle 5/5: default.riot ===
+  commit=True sha=502a68b30475bf21 running=yes nodes=0 bus 12/12 Q_GOOD
+
+=== VERDICTS ===
+  dev-board resets: 5 (expected 6 = console open + 5 deploys)
+  panics               0
+  task watchdog        0
+  TLS read errors      5
+  modbus mis-paired    0
+  modbus addr invalid  0
+  modbus other errors  0
+  config pushes seen : 0 (expect 0 — reconcile must hold across every reboot)
+  NVS restores       : 10 (expect 15 = 3 planes x resets)
+  deploy cycles      : #1 ok=True b2d6915546b5d7ff run=yes n=3 bus=12/12 | #2 ok=True 7ceefdfdb784f3af run=yes n=3 bus=12/12 | #3 ok=True b2d6915546b5d7ff run=yes n=3 bus=12/12 | #4 ok=True 7ceefdfdb784f3af run=yes n=3 bus=12/12 | #5 ok=True 502a68b30475bf21 run=yes n=0 bus=12/12
