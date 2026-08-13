@@ -1,0 +1,18 @@
+===== F (re-run, CE up): foreign flow demo =====
+[  7.857s] FLOW     committed — board persists and restarts in 3 s to load it
+studio2riot: 3 nodes, 2 wires -> /tmp/riot-deploy/flow.json
+riotc: /tmp/riot-deploy/flow.riot: 78 bytes sha256=b2d6915546b5d7ff7748b0dc2b7f7758cd9d47baec3b334d3be91fa7475fa979
+deploy: compiled=b2d6915546b5d7ff… (78 B)  board=7ceefdfdb784f3af… running=yes nodes=3
+deploy: state = FOREIGN
+studio2riot: 3 nodes, 2 wires -> /tmp/riot-deploy/flow.json
+riotc: /tmp/riot-deploy/flow.riot: 78 bytes sha256=b2d6915546b5d7ff7748b0dc2b7f7758cd9d47baec3b334d3be91fa7475fa979
+deploy: compiled=b2d6915546b5d7ff… (78 B)  board=7ceefdfdb784f3af… running=yes nodes=3
+deploy: state = FOREIGN
+deploy: board runs a flow this Studio has no record of — inspect first, or pass --force to overwrite (an explicit decision, never the default)
+deploy rc=3 (3 = refused as designed)
+
+===== restore: default flow + threshold =====
+[  7.765s] FLOW     committed — board persists and restarts in 3 s to load it
+threshold restored 200
+q>   flow: sha=502a68b30475bf21cc580d03e96efa44c34893c195df8975a67b6c1dbcb4ac6d
+        running=yes  nodes=0  received=0
