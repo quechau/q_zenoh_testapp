@@ -155,6 +155,7 @@ int  qz_request_quiet(qz_ctx_t *ctx, const char *service, qz_op_t op,
  *  `corrupt` flips one byte of chunk 0 after the sha was taken — the acceptance test that a
  *  bad upload leaves the old flow running. */
 int  qz_flow_put(qz_ctx_t *ctx, const char *path, bool corrupt);
+int  qz_flow_put_opts(qz_ctx_t *ctx, const char *path, bool corrupt, unsigned slow_ms);
 
 /** Prints FlowStatus — what the board is running, its sha, the sticky error. */
 int  qz_flow_status(qz_ctx_t *ctx);

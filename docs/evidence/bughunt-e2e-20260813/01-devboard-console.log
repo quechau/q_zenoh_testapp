@@ -1,0 +1,376 @@
+ (65053) Srvc_Zenoh: [LAN] heap: free=8061096 min=8054072 largest=7995392
+I (95192) Srvc_Zenoh: [LAN] heap: free=8061096 min=8054072 largest=7995392
+I (125332) Srvc_Zenoh: [LAN] heap: free=8061116 min=8054072 largest=7995392
+I (155477) Srvc_Zenoh: [LAN]I (999720) Srvc_Zenoh: [LAN] heap: free=8044328 min=8035600 largest=7995392
+I (1015013) App_Zenoh: FLOW begin: 8000 bytes expected, sha=1a2bea0774f7b419… via=ce-acf23c0d8637
+I (1030660) Srvc_Zenoh: [LAN] heap: free=7988948 min=7978872 largest=7864320
+I (1033165) App_Zenoh: FLOW begin: 8000 bytes expected, sha=1a2bea0774f7b419… via=ce-acf23c0d8637
+I (1061063) Srvc_Zenoh: [LAN] heap: free=7969304 min=7961744 largest=7864320
+I (1091205) Srvc_Zenoh: [LAN] heap: free=7969304 min=7961744 largest=7864320
+W (1112861) App_Zenoh: FLOW upload abandoned (no data for 60 s)
+I (1119651) App_Zenoh: FLOW begin: 15 bytes expected, sha=502a68b30475bf21… via=ce-acf23c0d8637
+I (1120361) Srvc_BACnet_Slave: Persistent storage of BACnet slave erased
+I (1120799) App_Zenoh: FLOW committed: 15 bytes fp=502a68b30475bf21… — restarting in 3 s to load
+I (1120800) Common: Restarting ESP32 in 3000 ms...
+I (1121830) Srvc_Zenoh: [LAN] heap: free=7929756 min=7922480 largest=7864320
+I (1123805) App_Network_Mngr: Reconnecting to wifi access point NubeiO
+[2000-01-23T02:25:07Z ERROR ::_z_read_tls] TLS read error: -76 -- closing the connection
+W (1123840) Srvc_Zenoh: [LAN] Session lost (network down) - reconnecting
+I (1123841) Srvc_Zenoh: [LAN] SESSION RUNNING -> SUSPENDED
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x2a (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4037dfce
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0xfd4
+load:0x403c8700,len:0xb34
+load:0x403cb700,len:0x2d48
+entry 0x403c8878
+I (346) octal_psram: vendor id    : 0x0d (AP)
+I (346) octal_psram: dev id       : 0x02 (generation 3)
+I (346) octal_psram: density      : 0x03 (64 Mbit)
+I (346) octal_psram: good-die     : 0x01 (Pass)
+I (346) octal_psram: Latency      : 0x01 (Fixed)
+I (347) octal_psram: VCC          : 0x01 (3V)
+I (347) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (347) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (347) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (348) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (348) octal_psram: DriveStrength: 0x00 (1/1)
+I (348) MSPI Timing: Enter psram timing tuning
+I (349) esp_psram: Found 8MB PSRAM device
+I (349) esp_psram: Speed: 80MHz
+I (350) cpu_start: Multicore app
+I (782) esp_psram: SPI SRAM memory test OK
+I (791) cpu_start: Pro cpu start user code
+I (791) cpu_start: cpu freq: 240000000 Hz
+I (792) app_init: Application information:
+I (792) app_init: Project name:     acb-m-riot
+I (792) app_init: App version:      0.2.0.0
+I (792) app_init: Compile time:     Aug 13 2026 14:45:37
+I (792) app_init: ELF file SHA256:  25741224c...
+I (792) app_init: ESP-IDF:          v6.0.1
+I (792) efuse_init: Min chip rev:     v0.0
+I (792) efuse_init: Max chip rev:     v0.99 
+I (793) efuse_init: Chip rev:         v0.2
+I (793) heap_init: Initializing. RAM available for dynamic allocation:
+I (793) heap_init: At 3FCC1CB0 len 00027A60 (158 KiB): RAM
+I (793) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (793) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (794) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (794) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (795) spi_flash: detected chip: generic
+I (795) spi_flash: flash io: dio
+I (797) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (797) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (798) main_task: Started on CPU0
+I (799) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (800) main_task: Calling app_main()
+I (800) App_Main: ***************************
+I (800) App_Main: ACB-M-RIOT firmware started
+I (800) App_Main: ***************************
+I (881) App_Main: Current system time: Sun Jan 23 02:25:08 2000
+
+I (883) LRAW: LoRaRaw Slave enabling...
+I (885) Srvc_LoRa_SX1262: RADIO CFG rx_freq=923500000 Hz bw=0x04 sf=7 cr=1 pwr=17 sync=0xAA
+I (886) LORAHUB_HAL: Connecting to SX126x radio
+I (886) LORAHUB_HAL: Initializing radio context
+I (886) LORAHUB_HAL: Set ANT_SW to 1 through GPIO38
+E (925) gpio: gpio_install_isr_service(540): GPIO isr service already installed
+I (940) Srvc_LoRa_SX1262: Random seed = 3680381221
+I (941) Srvc_LoRa_SX1262: SX1262 started successfully
+I (941) LRAW: LoRaRaw Slave started
+I (942) App_Main: RS485-1 role=1 line='38400-8-N-1'
+I (944) App_Main: RS485-2 role=3 line='38400-8-N-1'
+W (945) App_Network_Mngr: Ethernet DISABLED (PARAM_ETH_ENABLED = 0) — CH390 not initialized, WiFi only
+I (946) pp: pp rom version: e7ae62f
+I (947) net80211: net80211 rom version: e7ae62f
+I (948) wifi:wifi driver task: 3fceebfc, prio:23, stack:6656, core=0
+I (959) wifi:wifi firmware version: b37c951
+I (959) wifi:wifi certification version: v7.0
+I (959) wifi:config NVS flash: enabled
+I (959) wifi:config nano formatting: disabled
+I (959) wifi:Init data frame dynamic rx buffer num: 32
+I (960) wifi:Init static rx mgmt buffer num: 5
+I (960) wifi:Init management short buffer num: 32
+I (960) wifi:Init static tx buffer num: 16
+I (961) wifi:Init tx cache buffer num: 32
+I (961) wifi:Init static tx FG buffer num: 2
+I (961) wifi:Init static rx buffer size: 1600
+I (962) wifi:Init static rx buffer num: 8
+I (962) wifi:Init dynamic rx buffer num: 32
+I (963) wifi_init: rx ba win: 8
+I (963) wifi_init: accept mbox: 6
+I (963) wifi_init: tcpip mbox: 32
+I (963) wifi_init: udp mbox: 6
+I (963) wifi_init: tcp mbox: 6
+I (963) wifi_init: tcp tx win: 5760
+I (963) wifi_init: tcp rx win: 5760
+I (964) wifi_init: tcp mss: 1440
+I (964) wifi_init: WiFi/LWIP prefer SPIRAM
+I (964) wifi_init: WiFi IRAM OP enabled
+I (964) wifi_init: WiFi RX IRAM OP enabled
+acb-m-riot> I (973) uart: queue free spaces: 32
+I (975) Hwa_UART: Hwa_UART task for UART port 1 started
+I (976) App_Modbus: Modbus Master controller initialized
+I (977) App_Modbus: Modbus Slave controller initialized
+I (978) App_BACnet: BACnet Master controller initialized
+I (983) App_BACnet: BACnet Slave controller initialized
+I (985) LRRDE: Init LoRaRaw RDE
+I (986) LRRDE: LoRaRaw RDE init complete
+I (988) RIOT: Package 0x6362 added
+I (989) RIOT: Package 0x7362 added
+I (990) RIOT: Package 0x6F63 added
+I (991) RIOT: Package 0x7364 added
+I (991) RIOT: Package 0x7668 added
+I (992) RIOT: Package 0x616C added
+I (992) RIOT: Package 0x6F6C added
+I (992) RIOT: Package 0x4F4C added
+I (993) RIOT: Package 0x616D added
+I (993) RIOT: Package 0x626D added
+I (994) RIOT: Package 0x7473 added
+I (994) RIOT: Package 0x6974 added
+I (994) RIOT: Package 0x5056 added
+I (995) RIOT: Loading flow application (15 bytes)...
+I (997) RIOT: Flow application is loaded successfully
+I (997) RIOT: RIOT Engine Manager started
+I (999) App_Zenoh: Peer id: acbm-1cdbd4abbc7c
+I (1000) mdns_mem: mDNS task will be created from internal RAM
+I (1002) App_Zenoh: mDNS: advertised 'ACB-M acbm-1cdbd4abbc7c'._zenoh._tcp.local on port 7447 (host acbm-1cdbd4abbc7c.local)
+I (1004) App_Zenoh: client_id<->cert binding: ENFORCED (mTLS)
+I (1005) App_Zenoh: Auth ready: username(peerId)=acbm-1cdbd4abbc7c, per-boot nonce set
+I (1009) App_Zenoh: cfgstore modbus: restored 155 bytes fp=832d73e887cfb0c6
+I (1010) App_Zenoh: LIFECYCLE point=100155 HOLDING:42000 created
+I (1011) App_Modbus: Modbus point 11.42001 created
+I (1012) App_Zenoh: LIFECYCLE point=100158 HOLDING:40001 created
+I (1013) App_Modbus: Modbus point 1.40002 created
+I (1014) App_Zenoh: LIFECYCLE point=100170 HOLDING:40000 created
+I (1015) App_Modbus: Modbus point 1.40001 created
+I (1015) App_Zenoh: modbus config restored: 2 devices, 3 points (all accepted)
+I (1017) App_Zenoh: BACnet registry: 192 B devices + 6144 B points + 12496 B scratch in PSRAM
+I (1020) App_Zenoh: cfgstore bacnet: restored 70 bytes fp=802f2d355ab3b7ca
+I (1022) App_Zenoh: LIFECYCLE point=100161 BO:6 created
+I (1023) App_BACnet: BACnet point 4.4.6 created
+I (1023) App_Zenoh: LIFECYCLE point=100166 BI:4 created
+I (1024) App_BACnet: BACnet point 4.3.4 created
+I (1025) App_Zenoh: bacnet config restored: 1 devices, 2 points (all accepted)
+I (1029) App_Zenoh: FLOW stored: 15 bytes fp=502a68b30475bf21…
+I (1042) App_Zenoh: mTLS identity: provisioned (b64 ca=1520 B, cert=1612 B, key=2272 B)
+I (1045) Srvc_Zenoh: [LAN] SESSION STOPPED -> WAIT_NETWORK
+I (1045) Srvc_Zenoh: [LAN] Initialized (mode peer, locator 'tls/0.0.0.0:7447')
+I (1047) App_Zenoh: Initialized (peer 'acbm-1cdbd4abbc7c', LAN on mode peer locator 'tls/0.0.0.0:7447', CLOUD off)
+I (1050) ZenohLinkSup: no outbound links configured (0x02BA/0x02BB/0x02BC) — not starting
+I (1051) App_WS: Disabled (PARAM_WS_ENABLED = 0)
+I (1052) main_task: Returned from app_main()
+I (1068) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (1153) App_Network_Mngr: Connected to wifi access point NubeiO
+I (1286) App_BACnet: BACnet file 'Main Application firwmare' created
+I (1287) App_BACnet: BACnet file 'Command line interface' created
+I (1289) App_BACnet: BACnet file 'Riot flow application' created
+W (1290) App_BACnet: No nodes created by Riot engine, file 'Riot flow outputs' will not be created
+I (2174) App_Network_Mngr: IP address assigned to WiFi interface:
+I (2175) App_Network_Mngr: + IP: 192.168.10.29
+I (2176) App_Network_Mngr: + Netmask: 255.255.255.0
+I (2177) App_Network_Mngr: + Gateway: 192.168.10.1
+I (2177) App_Network_Mngr: + DNS: 123.26.26.26
+I (2178) esp_netif_handlers: sta ip: 192.168.10.29, mask: 255.255.255.0, gw: 192.168.10.1
+I (2546) Srvc_Zenoh: [LAN] SESSION WAIT_NETWORK -> CONNECTING
+I (3048) Srvc_Zenoh: TLS peer listen: mTLS on tls/0.0.0.0:7447 (fabric-CA certs from NVS, client certs required)
+I (3049) Srvc_Zenoh: [LAN] heap before z_open: INTERNAL free=35491 largest=16384 | total free=8229823
+I (3081) Srvc_Zenoh: [LAN] heap after z_open: INTERNAL free=12755 largest=7680
+I (3084) Srvc_Zenoh: [LAN] Subscriber declared: req/*/acbm-1cdbd4abbc7c/svc/**
+I (3085) Srvc_Zenoh: [LAN] SESSION CONNECTING -> RUNNING
+I (3507) App_Zenoh: NOTIFY point=100155 value=40.00 seq=1 q=good (HOLDING:42000)
+I (3508) App_Zenoh: NOTIFY point=100158 value=210.00 seq=1 q=good (HOLDING:40001)
+I (3509) App_Zenoh: NOTIFY point=100170 value=0.00 seq=1 q=good (HOLDING:40000)
+I (3511) App_Zenoh: notify publish: modbus 82 bytes -> 0
+I (3512) App_Zenoh: NOTIFY point=100161 value=1.00 seq=1 q=good (BO:6)
+I (3513) App_Zenoh: NOTIFY point=100166 value=1.00 seq=1 q=good (BI:4)
+I (3515) App_Zenoh: notify publish: bacnet 69 bytes -> 0
+I (4004) App_Zenoh: mDNS: STA netif registered + enabled — answering multicast browse now
+[2000-01-23T02:25:12Z ERROR ::_z_tls_accept] TLS server handshake failed: -0x7280
+I (5209) App_Zenoh: Client authorized: ce-a0ad9f5f8f2f
+I (12747) App_Zenoh: Client authorized: ce-acf23c0d8637
+I (13102) App_Zenoh: FLOW begin: 15 bytes expected, sha=502a68b30475bf21… via=ce-acf23c0d8637
+I (13806) Srvc_BACnet_Slave: Persistent storage of BACnet slave erased
+I (14241) App_Zenoh: FLOW committed: 15 bytes fp=502a68b30475bf21… — restarting in 3 s to load
+I (14242) Common: Restarting ESP32 in 3000 ms...
+I (17247) App_Network_Mngr: Reconnecting to wifi access point NubeiO
+[2000-01-23T02:25:24Z ERROR ::_z_read_tls] TLS read error: -76 -- closing the connection
+[2000-01-23T02:25:24Z ERROR ::_z_read_tls] TLS read error: -76 -- closing the connection
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x2a (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4037dfce
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0xfd4
+load:0x403c8700,len:0xb34
+load:0x403cb700,len:0x2d48
+entry 0x403c8878
+I (346) octal_psram: vendor id    : 0x0d (AP)
+I (346) octal_psram: dev id       : 0x02 (generation 3)
+I (346) octal_psram: density      : 0x03 (64 Mbit)
+I (346) octal_psram: good-die     : 0x01 (Pass)
+I (346) octal_psram: Latency      : 0x01 (Fixed)
+I (347) octal_psram: VCC          : 0x01 (3V)
+I (347) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (347) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (347) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (348) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (348) octal_psram: DriveStrength: 0x00 (1/1)
+I (348) MSPI Timing: Enter psram timing tuning
+I (349) esp_psram: Found 8MB PSRAM device
+I (349) esp_psram: Speed: 80MHz
+I (350) cpu_start: Multicore app
+I (782) esp_psram: SPI SRAM memory test OK
+I (791) cpu_start: Pro cpu start user code
+I (791) cpu_start: cpu freq: 240000000 Hz
+I (791) app_init: Application information:
+I (792) app_init: Project name:     acb-m-riot
+I (792) app_init: App version:      0.2.0.0
+I (792) app_init: Compile time:     Aug 13 2026 14:45:37
+I (792) app_init: ELF file SHA256:  25741224c...
+I (792) app_init: ESP-IDF:          v6.0.1
+I (792) efuse_init: Min chip rev:     v0.0
+I (792) efuse_init: Max chip rev:     v0.99 
+I (793) efuse_init: Chip rev:         v0.2
+I (793) heap_init: Initializing. RAM available for dynamic allocation:
+I (793) heap_init: At 3FCC1CB0 len 00027A60 (158 KiB): RAM
+I (793) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (793) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (794) heap_init: At 600FE000 len 00001FE8 (7 KiB): RTCRAM
+I (794) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (795) spi_flash: detected chip: generic
+I (795) spi_flash: flash io: dio
+I (797) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (797) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (798) main_task: Started on CPU0
+I (799) esp_psram: Reserving pool of 128K of internal memory for DMA/internal allocations
+I (800) main_task: Calling app_main()
+I (800) App_Main: ***************************
+I (800) App_Main: ACB-M-RIOT firmware started
+I (800) App_Main: ***************************
+I (881) App_Main: Current system time: Sun Jan 23 02:25:26 2000
+
+I (883) LRAW: LoRaRaw Slave enabling...
+I (885) Srvc_LoRa_SX1262: RADIO CFG rx_freq=923500000 Hz bw=0x04 sf=7 cr=1 pwr=17 sync=0xAA
+I (886) LORAHUB_HAL: Connecting to SX126x radio
+I (886) LORAHUB_HAL: Initializing radio context
+I (886) LORAHUB_HAL: Set ANT_SW to 1 through GPIO38
+E (926) gpio: gpio_install_isr_service(540): GPIO isr service already installed
+I (941) Srvc_LoRa_SX1262: Random seed = 3719966162
+I (942) Srvc_LoRa_SX1262: SX1262 started successfully
+I (942) LRAW: LoRaRaw Slave started
+I (943) App_Main: RS485-1 role=1 line='38400-8-N-1'
+I (945) App_Main: RS485-2 role=3 line='38400-8-N-1'
+W (946) App_Network_Mngr: Ethernet DISABLED (PARAM_ETH_ENABLED = 0) — CH390 not initialized, WiFi only
+I (947) pp: pp rom version: e7ae62f
+I (948) net80211: net80211 rom version: e7ae62f
+I (949) wifi:wifi driver task: 3fceebfc, prio:23, stack:6656, core=0
+I (960) wifi:wifi firmware version: b37c951
+I (960) wifi:wifi certification version: v7.0
+I (960) wifi:config NVS flash: enabled
+I (960) wifi:config nano formatting: disabled
+I (960) wifi:Init data frame dynamic rx buffer num: 32
+I (961) wifi:Init static rx mgmt buffer num: 5
+I (961) wifi:Init management short buffer num: 32
+I (961) wifi:Init static tx buffer num: 16
+I (962) wifi:Init tx cache buffer num: 32
+I (962) wifi:Init static tx FG buffer num: 2
+I (962) wifi:Init static rx buffer size: 1600
+I (963) wifi:Init static rx buffer num: 8
+I (963) wifi:Init dynamic rx buffer num: 32
+I (964) wifi_init: rx ba win: 8
+I (964) wifi_init: accept mbox: 6
+I (964) wifi_init: tcpip mbox: 32
+I (964) wifi_init: udp mbox: 6
+I (964) wifi_init: tcp mbox: 6
+I (964) wifi_init: tcp tx win: 5760
+I (964) wifi_init: tcp rx win: 5760
+I (964) wifi_init: tcp mss: 1440
+I (965) wifi_init: WiFi/LWIP prefer SPIRAM
+I (965) wifi_init: WiFi IRAM OP enabled
+I (965) wifi_init: WiFi RX IRAM OP enabled
+acb-m-riot> I (974) uart: queue free spaces: 32
+I (976) Hwa_UART: Hwa_UART task for UART port 1 started
+I (977) App_Modbus: Modbus Master controller initialized
+I (978) App_Modbus: Modbus Slave controller initialized
+I (979) App_BACnet: BACnet Master controller initialized
+I (984) App_BACnet: BACnet Slave controller initialized
+I (986) LRRDE: Init LoRaRaw RDE
+I (987) LRRDE: LoRaRaw RDE init complete
+I (989) RIOT: Package 0x6362 added
+I (990) RIOT: Package 0x7362 added
+I (990) RIOT: Package 0x6F63 added
+I (991) RIOT: Package 0x7364 added
+I (992) RIOT: Package 0x7668 added
+I (993) RIOT: Package 0x616C added
+I (993) RIOT: Package 0x6F6C added
+I (993) RIOT: Package 0x4F4C added
+I (994) RIOT: Package 0x616D added
+I (994) RIOT: Package 0x626D added
+I (995) RIOT: Package 0x7473 added
+I (995) RIOT: Package 0x6974 added
+I (995) RIOT: Package 0x5056 added
+I (996) RIOT: Loading flow application (15 bytes)...
+I (998) RIOT: Flow application is loaded successfully
+I (998) RIOT: RIOT Engine Manager started
+I (1000) App_Zenoh: Peer id: acbm-1cdbd4abbc7c
+I (1001) mdns_mem: mDNS task will be created from internal RAM
+I (1003) App_Zenoh: mDNS: advertised 'ACB-M acbm-1cdbd4abbc7c'._zenoh._tcp.local on port 7447 (host acbm-1cdbd4abbc7c.local)
+I (1005) App_Zenoh: client_id<->cert binding: ENFORCED (mTLS)
+I (1006) App_Zenoh: Auth ready: username(peerId)=acbm-1cdbd4abbc7c, per-boot nonce set
+I (1010) App_Zenoh: cfgstore modbus: restored 155 bytes fp=832d73e887cfb0c6
+I (1011) App_Zenoh: LIFECYCLE point=100155 HOLDING:42000 created
+I (1012) App_Modbus: Modbus point 11.42001 created
+I (1013) App_Zenoh: LIFECYCLE point=100158 HOLDING:40001 created
+I (1014) App_Modbus: Modbus point 1.40002 created
+I (1015) App_Zenoh: LIFECYCLE point=100170 HOLDING:40000 created
+I (1015) App_Modbus: Modbus point 1.40001 created
+I (1016) App_Zenoh: modbus config restored: 2 devices, 3 points (all accepted)
+I (1018) App_Zenoh: BACnet registry: 192 B devices + 6144 B points + 12496 B scratch in PSRAM
+I (1020) App_Zenoh: cfgstore bacnet: restored 70 bytes fp=802f2d355ab3b7ca
+I (1023) App_Zenoh: LIFECYCLE point=100161 BO:6 created
+I (1024) App_BACnet: BACnet point 4.4.6 created
+I (1024) App_Zenoh: LIFECYCLE point=100166 BI:4 created
+I (1025) App_BACnet: BACnet point 4.3.4 created
+I (1025) App_Zenoh: bacnet config restored: 1 devices, 2 points (all accepted)
+I (1030) App_Zenoh: FLOW stored: 15 bytes fp=502a68b30475bf21…
+I (1043) App_Zenoh: mTLS identity: provisioned (b64 ca=1520 B, cert=1612 B, key=2272 B)
+I (1046) Srvc_Zenoh: [LAN] Initialized (mode peer, locator 'tls/0.0.0.0:7447')
+I (1046) Srvc_Zenoh: [LAN] SESSION STOPPED -> WAIT_NETWORK
+I (1047) App_Zenoh: Initialized (peer 'acbm-1cdbd4abbc7c', LAN on mode peer locator 'tls/0.0.0.0:7447', CLOUD off)
+I (1051) ZenohLinkSup: no outbound links configured (0x02BA/0x02BB/0x02BC) — not starting
+I (1052) App_WS: Disabled (PARAM_WS_ENABLED = 0)
+I (1053) main_task: Returned from app_main()
+I (1069) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (1150) App_Network_Mngr: Connected to wifi access point NubeiO
+I (1513) App_BACnet: BACnet file 'Main Application firwmare' created
+I (1514) App_BACnet: BACnet file 'Command line interface' created
+I (1516) App_BACnet: BACnet file 'Riot flow application' created
+W (1517) App_BACnet: No nodes created by Riot engine, file 'Riot flow outputs' will not be created
+I (2165) App_Network_Mngr: IP address assigned to WiFi interface:
+I (2167) App_Network_Mngr: + IP: 192.168.10.29
+I (2167) App_Network_Mngr: + Netmask: 255.255.255.0
+I (2168) App_Network_Mngr: + Gateway: 192.168.10.1
+I (2168) App_Network_Mngr: + DNS: 123.26.26.26
+I (2169) esp_netif_handlers: sta ip: 192.168.10.29, mask: 255.255.255.0, gw: 192.168.10.1
+I (2548) Srvc_Zenoh: [LAN] SESSION WAIT_NETWORK -> CONNECTING
+I (3050) Srvc_Zenoh: TLS peer listen: mTLS on tls/0.0.0.0:7447 (fabric-CA certs from NVS, client certs required)
+I (3051) Srvc_Zenoh: [LAN] heap before z_open: INTERNAL free=35491 largest=16384 | total free=8229947
+I (3084) Srvc_Zenoh: [LAN] heap after z_open: INTERNAL free=12755 largest=7680
+I (3086) Srvc_Zenoh: [LAN] Subscriber declared: req/*/acbm-1cdbd4abbc7c/svc/**
+I (3087) Srvc_Zenoh: [LAN] SESSION CONNECTING -> RUNNING
+I (3508) App_Zenoh: NOTIFY point=100155 value=40.00 seq=1 q=good (HOLDING:42000)
+I (3509) App_Zenoh: NOTIFY point=100158 value=210.00 seq=1 q=good (HOLDING:40001)
+I (3510) App_Zenoh: NOTIFY point=100170 value=0.00 seq=1 q=good (HOLDING:40000)
+I (3512) App_Zenoh: notify publish: modbus 82 bytes -> 0
+I (3513) App_Zenoh: NOTIFY point=100161 value=1.00 seq=1 q=good (BO:6)
+I (3514) App_Zenoh: NOTIFY point=100166 value=1.00 seq=1 q=good (BI:4)
+I (3516) App_Zenoh: notify publish: bacnet 69 bytes -> 0
+I (4007) App_Zenoh: mDNS: STA netif registered + enabled — answering multicast browse now
+I (6152) App_Zenoh: Client authorized: ce-a0ad9f5f8f2f
+[2000-01-23T02:25:37Z ERROR ::_z_tls_accept] TLS server handshake failed: -0x7280
+I (19771) App_Zenoh: Client authorized: ce-acf23c0d8637

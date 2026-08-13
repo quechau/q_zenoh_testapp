@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define FLOW_CHUNK 384u
 
@@ -80,6 +81,13 @@ int qz_flow_status(qz_ctx_t *ctx)
 
 int qz_flow_put(qz_ctx_t *ctx, const char *path, bool corrupt)
 {
+    return qz_flow_put_opts(ctx, path, corrupt, 0);
+}
+
+/* slow_ms > 0 sleeps between chunks — the test hook that makes a mid-upload kill or a
+ * begin-over-begin reproducible instead of a race against a ~1 s transfer. */
+int qz_flow_put_opts(qz_ctx_t *ctx, const char *path, bool corrupt, unsigned slow_ms)
+{
     FILE *f = fopen(path, "rb");
     if (!f) { qz_log("ERR", "cannot open %s", path); return 1; }
     static uint8_t file[8192];
@@ -109,6 +117,7 @@ int qz_flow_put(qz_ctx_t *ctx, const char *path, bool corrupt)
         n += enc_ld(data + n, 2, file + off, c);
         file[off] = byte0;
         if (flow_send(ctx, data, n, 2, reply, &rl) != 0) { qz_log("ERR", "data@%zu failed", off); return 1; }
+        if (slow_ms) { struct timespec ts = { slow_ms / 1000, (slow_ms % 1000) * 1000000L }; nanosleep(&ts, NULL); }
     }
 
     /* commit: FlowWrite{3: FlowCommit{}} — the reply carries the verdict either way */

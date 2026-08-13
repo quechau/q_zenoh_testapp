@@ -285,8 +285,14 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         return qz_request(ctx, argv[1], parse_op(argc > 2 ? argv[2] : NULL), NULL, 0, 10);
     }
     if (strcmp(cmd, "flow") == 0) {
-        if (argc >= 3 && strcmp(argv[1], "put") == 0)
-            return qz_flow_put(ctx, argv[2], argc > 3 && strcmp(argv[3], "--corrupt") == 0);
+        if (argc >= 3 && strcmp(argv[1], "put") == 0) {
+            bool corrupt = false; unsigned slow = 0;
+            for (int i = 3; i < argc; i++) {
+                if (strcmp(argv[i], "--corrupt") == 0) corrupt = true;
+                if (strcmp(argv[i], "--slow") == 0) slow = 400;
+            }
+            return qz_flow_put_opts(ctx, argv[2], corrupt, slow);
+        }
         if (argc >= 2 && strcmp(argv[1], "status") == 0)
             return qz_flow_status(ctx);
         qz_log("ERR", "flow put <file.riot> [--corrupt] | flow status");

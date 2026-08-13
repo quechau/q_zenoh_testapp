@@ -1,0 +1,27 @@
+console open (dev board resets once)
+== S1: stale selection must be a NAMED refusal ==
+  rc=1 named=True  studio2riot: REFUSED: component 100152 no longer exists in the graph (HTTP Error 404: Not Found) — u
+== S2a: kill an upload mid-flight ==
+  after kill: received=2304 (expect >0 and <8000) err='-73'
+== S2b: begin-over-begin (second upload immediately, no waiting) ==
+  second upload staged: received=1152 (restarted, not resumed)
+== S2c: the 60 s idle timeout must NAME the abandonment ==
+  after 65 s idle: received=0 err='upload abandoned (no data for 60 s)'
+== S3: clean commit right after the mess ==
+  committed: True
+== S4: put fired while the board is mid-reboot from another commit ==
+  second put: failed gracefully after 6s
+  final: sha=502a68b30475bf21 running=yes err=''
+
+== S5 VERDICTS (dev-board console, whole run) ==
+  panics                 0
+  task watchdog          0
+  unexpected error logs  0
+  mis-paired modbus      0
+  resets: 2 (expected: console + S3 + S4 commits)
+    I (1015013) App_Zenoh: FLOW begin: 8000 bytes expected, sha=1a2bea0774f7b419… via=ce-acf23c0d8637
+    I (1033165) App_Zenoh: FLOW begin: 8000 bytes expected, sha=1a2bea0774f7b419… via=ce-acf23c0d8637
+    I (1119651) App_Zenoh: FLOW begin: 15 bytes expected, sha=502a68b30475bf21… via=ce-acf23c0d8637
+    I (1120799) App_Zenoh: FLOW committed: 15 bytes fp=502a68b30475bf21… — restarting in 3 s to load
+    I (13102) App_Zenoh: FLOW begin: 15 bytes expected, sha=502a68b30475bf21… via=ce-acf23c0d8637
+    I (14241) App_Zenoh: FLOW committed: 15 bytes fp=502a68b30475bf21… — restarting in 3 s to load
