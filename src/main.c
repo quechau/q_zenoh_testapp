@@ -63,6 +63,7 @@ static void usage(void)
 "  config <proto> add-device field=value ...   upsert one device (a delta)\n"
 "  config <proto> add-point  field=value ...   upsert one point  (a delta)\n"
 "  config <proto> del-device|del-point <id>...\n"
+"  flow put <file.riot> [--corrupt] | flow status\n"
 "        <proto> is modbus, bacnet or lora. Field names and enum values are the\n"
 "        contract's own; a wrong one lists what the .proto actually declares.\n"
 "  req <service> [op]      protobuf request/reply; op = read|write|execute|ping|discover\n"
@@ -282,6 +283,14 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         if (need_session(ctx) != 0) return -1;
         if (ctx->board[0] == '\0') qz_discover(ctx, 4);
         return qz_request(ctx, argv[1], parse_op(argc > 2 ? argv[2] : NULL), NULL, 0, 10);
+    }
+    if (strcmp(cmd, "flow") == 0) {
+        if (argc >= 3 && strcmp(argv[1], "put") == 0)
+            return qz_flow_put(ctx, argv[2], argc > 3 && strcmp(argv[3], "--corrupt") == 0);
+        if (argc >= 2 && strcmp(argv[1], "status") == 0)
+            return qz_flow_status(ctx);
+        qz_log("ERR", "flow put <file.riot> [--corrupt] | flow status");
+        return 1;
     }
     if (strcmp(cmd, "devices") == 0) {
         if (need_session(ctx) != 0) return -1;

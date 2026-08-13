@@ -174,7 +174,10 @@ def main():
     for name in msg_names:
         fields = msgs[name]
         if not fields:
-            out.append(f"static const qz_pfield_t f_{msg_idx[name]}[1];   /* {name}: no fields */\n")
+            # Zero-field message (e.g. FlowCommit): the msgs table row carries NULL/0, so
+            # no field array is emitted at all — a tentative array would trip
+            # -Werror=unused-const-variable on the firmware build.
+            pass
             continue
         out.append(f"/* {name} */\nstatic const qz_pfield_t f_{msg_idx[name]}[] = {{\n")
         for num, fname, ftype, rep, pkg in fields:

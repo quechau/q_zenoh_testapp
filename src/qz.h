@@ -149,6 +149,16 @@ int  qz_request_quiet(qz_ctx_t *ctx, const char *service, qz_op_t op,
                       const uint8_t *payload, size_t payload_len, unsigned timeout_s,
                       uint8_t *reply_out, size_t reply_cap, size_t *reply_len);
 
+/* ----------------------------------------------------------- flow.c */
+
+/** Uploads a .riot application over system.flow (begin/data/commit) and prints the verdict.
+ *  `corrupt` flips one byte of chunk 0 after the sha was taken — the acceptance test that a
+ *  bad upload leaves the old flow running. */
+int  qz_flow_put(qz_ctx_t *ctx, const char *path, bool corrupt);
+
+/** Prints FlowStatus — what the board is running, its sha, the sticky error. */
+int  qz_flow_status(qz_ctx_t *ctx);
+
 /* ----------------------------------------------------------- inventory.c */
 
 /** Prints every device and its points, across all three config planes.
