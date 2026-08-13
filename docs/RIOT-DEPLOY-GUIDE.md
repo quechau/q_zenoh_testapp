@@ -141,6 +141,25 @@ is how confidence rots.
 
 ---
 
+## 3.6 When a deploy fails — the recovery ladder
+
+Every failure mode leaves the board in a **known** state; work down the ladder, never guess:
+
+| where it failed | board state | what to do |
+| --- | --- | --- |
+| compile refused (riotc / studio2riot) | untouched — nothing was sent | fix the **named** error; that is what the names are for |
+| upload/commit refused (`sha256 mismatch`, bounds, incomplete) | **old flow still running** | re-run deploy; chunks are idempotent, a retry is safe |
+| commit OK but readback shows the **old/default** sha | `loadApp()` rejected it at boot and **erased** it — board fell back safely | the flow is invalid for this firmware: unregistered package or min-version ≠ 1.0.0; fix and redeploy |
+| readback timeout | board mid-reboot (~35 s) | `deploy.py` polls 120 s; if it still times out, run `deploy.py status` again — never assume |
+| board unreachable | rebooting or network | wait for port 7447, retry; nothing is half-applied (persist-then-ack) |
+| everything else | — | `flow put default.riot` restores the factory flow; device config is untouched (ADR-024); FC 0x15 remains the field-recovery door |
+
+The one thing you never need to do is wonder whether a failed deploy half-applied: the commit
+verifies before anything swaps, persists before it acks, and a rejected flow is erased by the
+engine itself with the default restored.
+
+---
+
 ## 4. Troubleshooting — every entry happened for real
 
 | symptom | cause | fix / where proven |
@@ -156,6 +175,7 @@ is how confidence rots.
 | opening the serial console "breaks" the test | opening the port **resets the ESP32-S3** | open console first; config+flow survive (ADR-024) but sessions/polls restart |
 | PATCH returns `000` | engine still booting (a stale diag line can fool a wait-for-auth grep) | wait on fresh log content, or on an actual REST read |
 | register writes rejected at exact value | device-side rule (damper accepts steps of 5) | test with values the device accepts |
+| write 1, ack `applied=1`, next read already 0 (immediate) | **the slave itself clears POWER** — the support board's AC handler won't hold 1 when the physical AC (FGA UART) is absent/off; measured: reset faster than any periodic writer | check the AC↔support-board cable/power; host side is healthy (echo OK) |
 | write 1, reads back 0 within seconds; AC won't start | **two writers on one register**: host loop re-asserts its live verdict, board flow re-asserts its deployed verdict every 2 s — any DIRTY window makes them differ | one point, one writer; `studio2riot` now refuses such selections (`docs/evidence/dual-writer-20260813/`) |
 | every card flashes `fault` ~35 s after Deploy | the designed deploy **reboot** — not a crash | wait for readback; `src_ts_ms` climbing proves no crash loop |
 | Modbus replies swap between two points | reply matched by address only across register kinds | fixed by the reply-kind guard; a restart clears residue |
