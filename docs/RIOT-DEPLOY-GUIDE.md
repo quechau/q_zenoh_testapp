@@ -156,6 +156,8 @@ is how confidence rots.
 | opening the serial console "breaks" the test | opening the port **resets the ESP32-S3** | open console first; config+flow survive (ADR-024) but sessions/polls restart |
 | PATCH returns `000` | engine still booting (a stale diag line can fool a wait-for-auth grep) | wait on fresh log content, or on an actual REST read |
 | register writes rejected at exact value | device-side rule (damper accepts steps of 5) | test with values the device accepts |
+| write 1, reads back 0 within seconds; AC won't start | **two writers on one register**: host loop re-asserts its live verdict, board flow re-asserts its deployed verdict every 2 s — any DIRTY window makes them differ | one point, one writer; `studio2riot` now refuses such selections (`docs/evidence/dual-writer-20260813/`) |
+| every card flashes `fault` ~35 s after Deploy | the designed deploy **reboot** — not a crash | wait for readback; `src_ts_ms` climbing proves no crash loop |
 | Modbus replies swap between two points | reply matched by address only across register kinds | fixed by the reply-kind guard; a restart clears residue |
 | board console floods TLS `-76`, watchdog fires | fixed sentinel bug (spin on dead socket) — should not recur | if seen: `e2e-after-tls-fix-20260813` is the reference picture |
 

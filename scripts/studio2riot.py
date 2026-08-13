@@ -19,7 +19,15 @@ Type map (refusals for anything outside it — riotc then refuses again at its o
                     (+1 — the same off-by-one the bench docs call the easiest mistake in the
                     system). slave/port come from the parent modbusDevice.
 
-Usage: studio2riot.py <uid,uid,…> <out.json>
+The dual-writer refusal (measured 2026-08-13, the "write 1 đọc về 0" incident): a compiled
+modbus-write point whose `in` is edge-driven on the sheet has TWO writers — the board flow
+re-asserting its verdict every refresh, and the host loop re-asserting *its* verdict on every
+change. When the two verdicts differ (an edited threshold not yet deployed, a board-side value
+lagging), the register oscillates and the loser looks like a device fault. Until the engine
+can gate host evaluation for a runOn subtree, this compiler REFUSES such selections unless
+--allow-dual-writer is passed explicitly — a bench decision, never a production default.
+
+Usage: studio2riot.py <uid,uid,…> <out.json> [--allow-dual-writer]
 """
 import json
 import sys
@@ -102,6 +110,18 @@ def main():
             pin_of[(u, "in")] = (u, "value")
         else:
             refuse(f"component {u} ({c['type']}) has no board mapping")
+
+    # The dual-writer refusal: every modbus-write we emit is also driven by the host through
+    # the very edge that defines the flow. One point, one writer — see the module docstring.
+    if "--allow-dual-writer" not in sys.argv:
+        for u, c in comps.items():
+            if c["type"] == "modbusPoint" and any(
+                    e["targetUid"] == u and e["targetProperty"] == "in" for e in edges):
+                refuse(f"modbusPoint {u} is written by BOTH the board flow and the host loop "
+                       "(its `in` is edge-driven on the sheet). One point, one writer: either "
+                       "keep the loop on the host (drop this point from the selection) or "
+                       "accept the race knowingly with --allow-dual-writer. Measured: the two "
+                       "writers fighting reads as a device fault (write 1, read back 0).")
 
     for e in sorted(edges, key=lambda e: e["uid"]):
         s = pin_of.get((e["sourceUid"], e["sourceProperty"]))
