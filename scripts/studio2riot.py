@@ -128,6 +128,16 @@ def main():
                        "accept the race knowingly with --allow-dual-writer. Measured: the two "
                        "writers fighting reads as a device fault (write 1, read back 0).")
 
+    # An unwired modbus-write input would make the RIOT node write its default — NaN — to a
+    # real register every refresh cycle. Refuse: a flow that would write garbage is worse than
+    # no flow, and "the point is in the selection but nothing feeds it" is a graph mistake the
+    # operator can actually fix.
+    fed = {(e["targetUid"], e["targetProperty"]) for e in edges}
+    for u, c in comps.items():
+        if c["type"] == "modbusPoint" and (u, "in") not in fed:
+            refuse(f"modbusPoint {u}: nothing in the selection feeds its input — the board "
+                   "flow would write NaN to the register every refresh. Wire it or drop it.")
+
     for e in sorted(edges, key=lambda e: e["uid"]):
         s = pin_of.get((e["sourceUid"], e["sourceProperty"]))
         d = pin_of.get((e["targetUid"], e["targetProperty"]))
