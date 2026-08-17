@@ -29,7 +29,10 @@ envelope.proto ............... the transport. Every packet in both directions.
 **The envelope does not name the payload's type.** `RequestEnvelope.payload` is `bytes`. A
 decoder has to read `service_id` and `op` out of the *same* envelope and look the type up in a
 table — which is what [`gen-proto-tables.py`](../scripts/gen-proto-tables.py) generates and
-what both this tool and the board's own tracer use.
+what all three tracers use: this tool, the board's (`zenoh_trace.c`) and the Control
+Engine's (`ce-edgelink` `packet_trace.cpp`). One generator, three consumers — the ends
+name a field identically or they are all wrong together, so a name mismatch in a dump
+points at the contract, never at a tracer.
 
 **The three field buses are deliberately identical past the decode.** `modbus_points.proto`,
 `bacnet_points.proto` and `lora_points.proto` are field-for-field the same: `PointValue`,
@@ -1172,6 +1175,11 @@ tail -f /tmp/edgelink-diag.log
 
 Both streams share one file on purpose: a packet dump is worth most read next to the decision it
 produced.
+
+Unlike the board's `param_set 710` — live within ~5 s on a running board — `EDGELINK_TRACE`
+is read **once at startup** (a static in `packet_trace.cpp`), so changing the level means
+restarting the engine. Nothing persists either: it is an environment variable, not NVS, so a
+restart without it is back to quiet.
 
 ```
 AUTH   peer=acbm-1cdbd4abbc7c result=OK (unlocked)
