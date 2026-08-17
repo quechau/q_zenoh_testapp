@@ -1,3 +1,10 @@
+> **⚠️ SUPERSEDED — 2026-08-17 (ADR-025 phase 1).** The RIOT deploy pipeline this guide
+> describes is RETIRED: the Control Engine is the only runtime and wiring on the sheet
+> IS the deployment. `flow.c`, `riotc.py`, `studio2riot.py`, `deploy.py` and the Deploy
+> widget are removed; the `flow` console verb answers with a retirement notice. Kept as
+> history — the measured behaviors (chunked upload, sha verify, refusals) documented
+> here informed the retirement analysis: `control-engine-docs/proposals/retire-riot-engine.md`.
+
 # RIOT deploy — usage & testing guide
 
 Everything the Node-RED-parity roadmap built, in one place: how to wire across sheets, author

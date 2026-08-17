@@ -63,7 +63,7 @@ static void usage(void)
 "  config <proto> add-device field=value ...   upsert one device (a delta)\n"
 "  config <proto> add-point  field=value ...   upsert one point  (a delta)\n"
 "  config <proto> del-device|del-point <id>...\n"
-"  flow put <file.riot> [--corrupt] | flow status\n"
+"  (flow — RETIRED by ADR-025: the CE is the only runtime)\n"
 "        <proto> is modbus, bacnet or lora. Field names and enum values are the\n"
 "        contract's own; a wrong one lists what the .proto actually declares.\n"
 "  req <service> [op]      protobuf request/reply; op = read|write|execute|ping|discover\n"
@@ -285,17 +285,11 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         return qz_request(ctx, argv[1], parse_op(argc > 2 ? argv[2] : NULL), NULL, 0, 10);
     }
     if (strcmp(cmd, "flow") == 0) {
-        if (argc >= 3 && strcmp(argv[1], "put") == 0) {
-            bool corrupt = false; unsigned slow = 0;
-            for (int i = 3; i < argc; i++) {
-                if (strcmp(argv[i], "--corrupt") == 0) corrupt = true;
-                if (strcmp(argv[i], "--slow") == 0) slow = 400;
-            }
-            return qz_flow_put_opts(ctx, argv[2], corrupt, slow);
-        }
-        if (argc >= 2 && strcmp(argv[1], "status") == 0)
-            return qz_flow_status(ctx);
-        qz_log("ERR", "flow put <file.riot> [--corrupt] | flow status");
+        /* Retired, not vanished: an operator with muscle memory (or an old script) gets
+        ** the reason and the pointer, and the line is grep-able in any captured log. */
+        qz_log("FLOW", "retired (ADR-025 phase 1, 2026-08-17): the Control Engine is the "
+                       "only runtime — wiring on the sheet IS the deployment. See "
+                       "control-engine-docs/proposals/retire-riot-engine.md");
         return 1;
     }
     if (strcmp(cmd, "devices") == 0) {
