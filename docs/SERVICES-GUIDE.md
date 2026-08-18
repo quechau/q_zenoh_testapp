@@ -1286,8 +1286,9 @@ write fails rather than discovered later by a board that came back empty.
 
 ## Related
 
-* [`RIOT-DEPLOY-GUIDE.md`](RIOT-DEPLOY-GUIDE.md) — flows on the board: wiring across sheets,
-  compile, the Deploy button, testing and troubleshooting
+* [`RIOT-DEPLOY-GUIDE.md`](RIOT-DEPLOY-GUIDE.md) — SUPERSEDED (ADR-025): the RIOT deploy
+  pipeline it describes is retired; firmware removal completed 2026-08-18 (contract 0.4.0,
+  `system.flow` no longer served). Kept as history.
 * `control-engine-docs/Contracts/proto-contracts/proto` — the contract this tool builds against
   when a checkout sits beside it (CMake says which source it used). [`../proto/`](../proto) is a
   bundled fallback for standalone builds and can lag — it did, and a board field this tool had
