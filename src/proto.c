@@ -1,4 +1,4 @@
-/** proto.c — just enough protobuf for the rubix envelopes.
+/** proto.c — just enough protobuf for the ce.embedded envelopes.
  *
  * Hand-rolled on purpose: the app then has no protoc, no grpc and no generated sources to
  * keep in step. Field numbers were verified against ACB-M's generated

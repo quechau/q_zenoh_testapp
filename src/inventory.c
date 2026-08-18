@@ -33,12 +33,12 @@ typedef struct {
 } plane_t;
 
 static const plane_t PLANES[] = {
-    { "modbus", "rubix.embedded.modbus.v1.ModbusConfig",
-      "rubix.embedded.modbus.v1.ModbusDeviceDef", "rubix.embedded.modbus.v1.ModbusPointDef" },
-    { "bacnet", "rubix.embedded.bacnet.v1.BacnetConfig",
-      "rubix.embedded.bacnet.v1.BacnetDeviceDef", "rubix.embedded.bacnet.v1.BacnetPointDef" },
-    { "lora",   "rubix.embedded.lora.v1.LoraConfig",
-      "rubix.embedded.lora.v1.LoraDeviceDef",     "rubix.embedded.lora.v1.LoraPointDef" },
+    { "modbus", "ce.embedded.modbus.v1.ModbusConfig",
+      "ce.embedded.modbus.v1.ModbusDeviceDef", "ce.embedded.modbus.v1.ModbusPointDef" },
+    { "bacnet", "ce.embedded.bacnet.v1.BacnetConfig",
+      "ce.embedded.bacnet.v1.BacnetDeviceDef", "ce.embedded.bacnet.v1.BacnetPointDef" },
+    { "lora",   "ce.embedded.lora.v1.LoraConfig",
+      "ce.embedded.lora.v1.LoraDeviceDef",     "ce.embedded.lora.v1.LoraPointDef" },
 };
 
 static bool read_varint(const uint8_t *b, size_t len, size_t *i, uint64_t *out)

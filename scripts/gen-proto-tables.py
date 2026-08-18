@@ -21,8 +21,8 @@ nothing in source control. The ACB-M firmware commits its copy instead, next to 
 output it already commits, because an ESP-IDF build should not need Python:
 
     python3 gen-proto-tables.py <proto-dir> \
-        ACB-M/components/app_zenoh/codec/rubix_schema.c \
-        ACB-M/components/app_zenoh/codec/rubix_schema.h rbs
+        ACB-M/components/app_zenoh/codec/ce_schema.c \
+        ACB-M/components/app_zenoh/codec/ce_schema.h rbs
 """
 
 import re

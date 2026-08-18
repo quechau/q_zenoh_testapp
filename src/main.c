@@ -23,7 +23,7 @@ static void expand_home(const char *in, char *out, size_t out_len)
 static void usage(void)
 {
     printf(
-"q_zenoh_testapp — a zenoh PEER that speaks the rubix contract, for testing ACB-M boards\n"
+"q_zenoh_testapp — a zenoh PEER that speaks the CE contract, for testing ACB-M boards\n"
 "\n"
 "USAGE\n"
 "  q_zenoh_testapp [options] [command [args]]\n"
@@ -47,7 +47,7 @@ static void usage(void)
 "\n"
 "COMMANDS\n"
 "  scan [secs]             find boards by mDNS — no session and no address needed\n"
-"  discover [secs]         listen for rubix/peers/*/announce; also reports each auth nonce\n"
+"  discover [secs]         listen for ce/peers/*/announce; also reports each auth nonce\n"
 "  use <board-id>          choose which board later commands address\n"
 "  connect [endpoint]      open the mTLS peer session\n"
 "  disconnect              close it\n"
@@ -127,9 +127,9 @@ static const qz_pmsg_t *msg_for(const char *proto, const char *shape)
     if (strstr(shape, "%s") != NULL) {
         char leaf[64];
         snprintf(leaf, sizeof leaf, shape, Proto);
-        snprintf(name, sizeof name, "rubix.embedded.%s.v1.%s", proto, leaf);
+        snprintf(name, sizeof name, "ce.embedded.%s.v1.%s", proto, leaf);
     } else {
-        snprintf(name, sizeof name, "rubix.embedded.%s.v1.%s", proto, shape);
+        snprintf(name, sizeof name, "ce.embedded.%s.v1.%s", proto, shape);
     }
     const qz_pmsg_t *m = qz_msg_find(name);
     if (m == NULL) qz_log("ERR", "the contract has no %s", name);

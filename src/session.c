@@ -105,10 +105,10 @@ static void on_announce(z_loaned_sample_t *sample, void *arg)
     memcpy(key, z_string_data(z_loan(ks)), kl);
     key[kl] = '\0';
 
-    /* rubix/peers/<peer-id>/announce */
-    const char *p = strstr(key, "rubix/peers/");
+    /* ce/peers/<peer-id>/announce */
+    const char *p = strstr(key, "ce/peers/");
     if (p == NULL) return;
-    p += strlen("rubix/peers/");
+    p += strlen("ce/peers/");
     const char *slash = strchr(p, '/');
     if (slash == NULL) return;
     char id[QZ_MAX_ID];
@@ -159,14 +159,14 @@ int qz_discover(qz_ctx_t *ctx, unsigned seconds)
     z_owned_closure_sample_t closure;
     z_closure_sample(&closure, on_announce, NULL, ctx);
     z_view_keyexpr_t ke;
-    z_view_keyexpr_from_str(&ke, "rubix/peers/*/announce");
+    z_view_keyexpr_from_str(&ke, "ce/peers/*/announce");
     z_owned_subscriber_t sub;
     if (z_declare_subscriber(z_loan(ctx->session), &sub, z_loan(ke), z_move(closure), NULL)
         != Z_OK) {
         qz_log("ERR", "could not subscribe to the announce beacon");
         return -1;
     }
-    qz_log("SCAN", "listening %us for rubix/peers/*/announce", seconds);
+    qz_log("SCAN", "listening %us for ce/peers/*/announce", seconds);
     sleep(seconds);
     z_drop(z_move(sub));
 
@@ -406,7 +406,7 @@ static int qz_request_impl(qz_ctx_t *ctx, const char *service, qz_op_t op,
          * mean the request never arrived. */
         qz_log("REQ", "no reply within %us on %s", timeout_s, ack_key);
         qz_log("HINT", "that key carries the transaction id. A board built before the id was "
-                       "added replies on rubix/%s/svc/%s/res/%s with no trailing chunk, which "
+                       "added replies on ce/%s/svc/%s/res/%s with no trailing chunk, which "
                        "this subscription cannot match — flash it, or subscribe .../*/%s/**",
                ctx->board, service, ctx->client_id, ctx->client_id);
         return -1;
