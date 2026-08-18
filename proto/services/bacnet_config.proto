@@ -28,7 +28,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.bacnet.v1;
+package ce.embedded.bacnet.v1;
 
 // ---------------------------------------------------------------------------
 // Definitions
@@ -99,6 +99,22 @@ message BacnetPointDef {
   // (older hosts); consumers must fall back to the point id. Same field
   // semantics and bound as ModbusPointDef.name.
   string           name         = 8;
+
+  // --- Per-point failsafe (contract 0.4.1, ADR-025 / customer-confirmed A-1) ---
+  // "If no AUTHENTICATED host request reaches the board for `failsafe_timeout_s`
+  // seconds, drive this point to `failsafe_value`." The retained fragment of the
+  // flow engine's responsibility: configuration, not deployment. The host keeps
+  // the timer honest by sending a periodic authenticated keepalive (an ordinary
+  // points READ), so a quiet-but-healthy link never false-triggers. Re-auth +
+  // re-assert (FR-CTRL-003) restores the desired value afterwards.
+  // Only meaningful on writable points; the board ignores it elsewhere.
+  // timeout_s < 30 with enable = true is invalid (rejected REJ_INVALID): the
+  // timeout MUST exceed the host keepalive period (20 s) with margin, or a
+  // quiet-but-healthy link false-triggers between two keepalives (measured).
+  // Recommended starting point: 60 s (~6x the measured recovery time, TC-42).
+  bool   failsafe_enable    = 10;
+  float  failsafe_value     = 11;
+  uint32 failsafe_timeout_s = 12;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +124,12 @@ message BacnetPointDef {
 message BacnetConfig {
   repeated BacnetDeviceDef devices = 1;   // bounded via .options
   repeated BacnetPointDef  points  = 2;
+
+  // Fingerprint of the config this device has stored — opaque, compared only for
+  // equality against a value read from this same device earlier. Empty ⇒ no
+  // persistence, so the host must push unconditionally. Full rules, including why
+  // the encoding is canonicalised by id, are in modbus_config.proto.
+  string config_hash = 3;
 }
 
 // ---------------------------------------------------------------------------

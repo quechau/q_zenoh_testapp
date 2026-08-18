@@ -1,4 +1,4 @@
-# The rubix services, and how to exercise them
+# The CE services, and how to exercise them
 
 What the `.proto` files say, how a request becomes bytes and comes back, and the exact commands
 that drive each service against a real board. Every listing here was captured from
@@ -55,7 +55,7 @@ Everything else in the config plane is the same shape: `XxxConfig` is the READ s
 
 **Two names are reused across packages.** `PointValue`, `PointWrite`, `ConfigReject`,
 `ConfigResult`, `PollClass` and `Quality` each exist three times, once per package. A lookup by
-bare name is ambiguous; always qualify — `rubix.embedded.modbus.v1.PointWrite`.
+bare name is ambiguous; always qualify — `ce.embedded.modbus.v1.PointWrite`.
 
 ---
 
@@ -1025,8 +1025,8 @@ Type a field name the `.proto` does not declare and the tool prints the ones it 
 legal values for every enum — so the contract is the reference, not this page:
 
 ```
-ERR   'register_type' is not a field of rubix.embedded.modbus.v1.ModbusPointDef
-HINT  rubix.embedded.modbus.v1.ModbusPointDef accepts:
+ERR   'register_type' is not a field of ce.embedded.modbus.v1.ModbusPointDef
+HINT  ce.embedded.modbus.v1.ModbusPointDef accepts:
         point_id       uint
         device_ref     uint
         reg_type       enum: REG_UNSPECIFIED REG_COIL REG_DISCRETE REG_INPUT REG_HOLDING

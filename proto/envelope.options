@@ -1,0 +1,12 @@
+# envelope.options — nanopb caps for the common request/response wrapper.
+# See Embedded-Devices/docs/espidf-port/phase-03-board-info-proto-nanopb-contract.md §4.
+
+ce.embedded.v1.RequestEnvelope.service_id   max_size:48
+ce.embedded.v1.RequestEnvelope.client_id    max_size:32
+ce.embedded.v1.RequestEnvelope.payload      max_size:512
+
+ce.embedded.v1.ResponseEnvelope.service_id  max_size:48
+ce.embedded.v1.ResponseEnvelope.payload     max_size:1536
+
+ce.embedded.v1.ErrorInfo.message            max_size:96
+ce.embedded.v1.ErrorInfo.detail             max_size:128

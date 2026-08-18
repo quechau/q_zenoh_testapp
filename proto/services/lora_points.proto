@@ -19,7 +19,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.lora.v1;
+package ce.embedded.lora.v1;
 
 enum Quality {
   Q_UNSPECIFIED = 0;

@@ -1,0 +1,17 @@
+# lora_config.options — nanopb bounds (must keep every message under the
+# envelope payload caps: request 512 B, response 1536 B).
+#
+# Bounds match modbus/bacnet so the host chunks all three config planes with
+# one set of constants. Droplet fleets are small (a handful of sensors per
+# board), so the 16/64 registry caps are generous.
+
+ce.embedded.lora.v1.LoraConfig.devices                max_count:16
+ce.embedded.lora.v1.LoraConfig.points                 max_count:64
+ce.embedded.lora.v1.LoraConfigDelta.upsert_devices    max_count:8
+ce.embedded.lora.v1.LoraConfigDelta.upsert_points     max_count:16
+ce.embedded.lora.v1.LoraConfigDelta.remove_device_ids max_count:8
+ce.embedded.lora.v1.LoraConfigDelta.remove_point_ids  max_count:16
+ce.embedded.lora.v1.ConfigResult.applied_ids          max_count:24
+ce.embedded.lora.v1.ConfigResult.rejected             max_count:24
+ce.embedded.lora.v1.LoraPointDef.name                 max_size:24
+ce.embedded.lora.v1.LoraConfig.config_hash            max_size:17

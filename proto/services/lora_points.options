@@ -1,0 +1,5 @@
+# lora_points.options — nanopb bounds. A full PointValues batch (32 points)
+# must stay under the 1536 B response-payload cap: 32 * ~35 B ≈ 1120 B. OK.
+
+ce.embedded.lora.v1.PointValues.values          max_count:32
+ce.embedded.lora.v1.PointReadRequest.point_ids  max_count:32

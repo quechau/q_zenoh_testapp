@@ -7,7 +7,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.modbus.v1;
+package ce.embedded.modbus.v1;
 
 enum Quality {
   Q_UNSPECIFIED = 0;

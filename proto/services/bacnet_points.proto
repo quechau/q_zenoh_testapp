@@ -16,7 +16,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.bacnet.v1;
+package ce.embedded.bacnet.v1;
 
 enum Quality {
   Q_UNSPECIFIED = 0;

@@ -9,7 +9,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.v1;
+package ce.embedded.v1;
 
 // ---------------------------------------------------------------------------
 // Envelope — common to every service request and reply.

@@ -5,7 +5,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.boardinfo.v1;
+package ce.embedded.boardinfo.v1;
 
 // ---------------------------------------------------------------------------
 // Read request — empty in v1; reserved for future filters.

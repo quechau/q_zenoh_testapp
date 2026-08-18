@@ -6,7 +6,7 @@
 
 syntax = "proto3";
 
-package rubix.embedded.modbus.v1;
+package ce.embedded.modbus.v1;
 
 // ---------------------------------------------------------------------------
 // Definitions
@@ -85,6 +85,22 @@ message ModbusPointDef {
   // to the point id. Bounded small (.options) because it rides the same
   // 512 B delta / 1536 B snapshot caps as everything else.
   string       name       = 9;
+
+  // --- Per-point failsafe (contract 0.4.1, ADR-025 / customer-confirmed A-1) ---
+  // "If no AUTHENTICATED host request reaches the board for `failsafe_timeout_s`
+  // seconds, drive this point to `failsafe_value`." The retained fragment of the
+  // flow engine's responsibility: configuration, not deployment. The host keeps
+  // the timer honest by sending a periodic authenticated keepalive (an ordinary
+  // points READ), so a quiet-but-healthy link never false-triggers. Re-auth +
+  // re-assert (FR-CTRL-003) restores the desired value afterwards.
+  // Only meaningful on writable points; the board ignores it elsewhere.
+  // timeout_s < 30 with enable = true is invalid (rejected REJ_INVALID): the
+  // timeout MUST exceed the host keepalive period (20 s) with margin, or a
+  // quiet-but-healthy link false-triggers between two keepalives (measured).
+  // Recommended starting point: 60 s (~6x the measured recovery time, TC-42).
+  bool   failsafe_enable    = 10;
+  float  failsafe_value     = 11;
+  uint32 failsafe_timeout_s = 12;
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +110,31 @@ message ModbusPointDef {
 message ModbusConfig {
   repeated ModbusDeviceDef devices = 1;   // bounded via .options
   repeated ModbusPointDef  points  = 2;
+
+  // Fingerprint of the config this device has stored, so a host can ask "are you
+  // still holding what I last sent you?" without diffing the snapshot field by
+  // field — a comparison that two independent implementations get subtly wrong.
+  //
+  // OPAQUE to consumers. Compare it for equality against a value read from THIS
+  // device earlier; never recompute it, never parse it, never compare it across
+  // devices. The construction (first 8 bytes of the SHA-256 over the canonical
+  // encoding of `devices` + `points` with this field empty, lowercase hex) is the
+  // device's business and may change without a contract bump. Only the equality
+  // contract is normative:
+  //
+  //   same value  ⇒ the stored config has not changed since it was last read
+  //   differs     ⇒ it has changed, or the device restarted without it
+  //
+  // "Canonical" carries the weight here: entries are ordered by id before
+  // hashing, so a device that reloads its config from storage after a reboot
+  // reports the value it reported before, even though its internal slot order
+  // may differ. Without that the fingerprint would change on every boot and be
+  // worse than useless — it would say "changed" when nothing had.
+  //
+  // Empty ⇒ this device does not implement config persistence. A host MUST then
+  // fall back to pushing unconditionally; an absent fingerprint is never treated
+  // as "unchanged". (proto3 omits defaults, so old devices are exactly this case.)
+  string config_hash = 3;
 }
 
 // ---------------------------------------------------------------------------

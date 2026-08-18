@@ -1,0 +1,21 @@
+# bacnet_config.options — nanopb bounds (must keep every message under the
+# envelope payload caps: request 512 B, response 1536 B).
+#
+# Bounds match modbus_config.options so the host can chunk both config planes
+# with one set of constants. BacnetPointDef is the smaller message of the two
+# (no data_type, no address), so the modbus bounds are safe here by inspection.
+#
+# Note the board's own BACnet point pool holds 128 entries and is a bump
+# allocator with no reclaim, so ConfigDelta.upsert_points is the throttle that
+# keeps a config resync from exhausting it.
+
+ce.embedded.bacnet.v1.BacnetConfig.devices                max_count:16
+ce.embedded.bacnet.v1.BacnetConfig.points                 max_count:64
+ce.embedded.bacnet.v1.BacnetConfigDelta.upsert_devices    max_count:8
+ce.embedded.bacnet.v1.BacnetConfigDelta.upsert_points     max_count:16
+ce.embedded.bacnet.v1.BacnetConfigDelta.remove_device_ids max_count:8
+ce.embedded.bacnet.v1.BacnetConfigDelta.remove_point_ids  max_count:16
+ce.embedded.bacnet.v1.ConfigResult.applied_ids            max_count:24
+ce.embedded.bacnet.v1.ConfigResult.rejected               max_count:24
+ce.embedded.bacnet.v1.BacnetPointDef.name             max_size:24
+ce.embedded.bacnet.v1.BacnetConfig.config_hash        max_size:17

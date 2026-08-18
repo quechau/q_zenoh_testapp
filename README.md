@@ -1,6 +1,6 @@
 # q_zenoh_testapp
 
-A zenoh **peer** in C that speaks the rubix contract, for exercising ACB-M boards by hand.
+A zenoh **peer** in C that speaks the CE contract, for exercising ACB-M boards by hand.
 
 It is deliberately the same shape as the thing it tests: zenoh-pico 1.9.0, mutual TLS, the
 same protobuf envelopes, the same key expressions. What it proves about a board is therefore
@@ -93,14 +93,14 @@ time unless `--debug` is given.
 ./build/q_zenoh_testapp --endpoint tls/192.168.10.29:7447
 q> discover
 q> login <password>
-q> sub rubix/** 20
+q> sub ce/** 20
 q> req modbus.points read
 ```
 
 | Command | What it does |
 | --- | --- |
 | `scan [secs]` | finds boards with no session and no address: mDNS for the name, a TCP sweep for the address |
-| `discover [secs]` | listens on `rubix/peers/*/announce`, lists boards **and their nonce** |
+| `discover [secs]` | listens on `ce/peers/*/announce`, lists boards **and their nonce** |
 | `use <board-id>` | choose which board later commands address |
 | `connect [endpoint]` / `disconnect` | open or close the mTLS peer session |
 | `login <password>` | S1 login, `sha256(nonce:client_id:sha256(password))` |
@@ -174,7 +174,7 @@ wrong proof.
 ```
 src/main.c      argument handling, one-shot commands, REPL
 src/session.c   zenoh session, discovery, pub/sub, login, request/reply
-src/proto.c     protobuf encode/decode for the rubix envelopes (no protoc needed)
+src/proto.c     protobuf encode/decode for the CE envelopes (no protoc needed)
 src/ca.c        CA enrolment over HTTPS: register, key, CSR, sign
 src/mdns.c      finding boards: mDNS for the name, TCP sweep for the address
 src/json.c       protobuf rendered as readable JSON, inferred rather than generated

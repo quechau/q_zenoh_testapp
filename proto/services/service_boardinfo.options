@@ -1,0 +1,22 @@
+# service_boardinfo.options — nanopb caps. See Phase-03 §4.
+
+ce.embedded.boardinfo.v1.BoardInfo.board_name        max_size:48
+ce.embedded.boardinfo.v1.BoardInfo.board_type        max_size:32
+ce.embedded.boardinfo.v1.BoardInfo.chip_type         max_size:16
+ce.embedded.boardinfo.v1.BoardInfo.hardware_version  max_size:16
+ce.embedded.boardinfo.v1.BoardInfo.software_version  max_size:24
+ce.embedded.boardinfo.v1.BoardInfo.firmware_version  max_size:24
+ce.embedded.boardinfo.v1.BoardInfo.protocol_version  max_size:16
+ce.embedded.boardinfo.v1.BoardInfo.build_time        max_size:32
+
+ce.embedded.boardinfo.v1.BoardInfo.supported_services    max_count:16
+ce.embedded.boardinfo.v1.BoardInfo.supported_transports  max_count:4
+ce.embedded.boardinfo.v1.BoardInfo.supported_interfaces  max_count:16
+
+ce.embedded.boardinfo.v1.SupportedService.service_id     max_size:48
+ce.embedded.boardinfo.v1.SupportedService.version        max_size:16
+
+ce.embedded.boardinfo.v1.SupportedTransport.transport_id max_size:32
+ce.embedded.boardinfo.v1.SupportedTransport.version      max_size:16
+
+ce.embedded.boardinfo.v1.SupportedInterface.backing      max_size:32
