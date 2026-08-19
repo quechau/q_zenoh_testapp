@@ -1,0 +1,32 @@
+q_zenoh_testapp — type `help` for commands, `quit` to leave
+q> [  0.000s] ID       client_id taken from the certificate CN: ce-acf23c0d8637
+[  1.585s] OPEN     session up in 1585 ms  endpoint=tls/192.168.10.29:7447  client_id=ce-acf23c0d8637
+[  1.586s] SCAN     listening 6s for ce/peers/*/announce
+[  2.359s] FOUND    acbm-1cdbd4abbc7c  (nonce 2e53e9c47a35541cbc20e30c3ad03869)
+
+  PEER ID                      ANNOUNCES  NONCE
+  acbm-1cdbd4abbc7c                    6  2e53e9c47a35541cbc20e30c3ad03869
+
+[  7.586s] SELECT   only one board seen — commands will address acbm-1cdbd4abbc7c
+q> [2026-08-19T14:31:50Z ERROR ::_z_read_tls] TLS read error: -76
+[2026-08-19T14:31:53Z ERROR ::_z_write_tls] TLS write error: -0x004e
+[2026-08-19T14:31:56Z ERROR ::_z_write_tls] TLS write error: -0x004e
+[2026-08-19T14:32:12Z ERROR ::_z_write_tls] TLS write error: -0x004e
+[ 34.525s] HINT     the session is DEAD — the board likely rebooted and cut the TCP link (a reboot also clears its RAM config). Reconnecting...
+[ 34.526s] CLOSE    session closed
+[ 36.452s] OPEN     session up in 1926 ms  endpoint=tls/192.168.10.29:7447  client_id=ce-acf23c0d8637
+[ 36.452s] HINT     session reopened. Authorized services need `login <password>` again (auth is per-session).
+[ 36.803s] RES      FAILED — ERROR_PERMISSION (code 4)
+  modbus  (no answer)
+[ 37.203s] RES      FAILED — ERROR_PERMISSION (code 4)
+  bacnet  (no answer)
+[ 37.554s] RES      FAILED — ERROR_PERMISSION (code 4)
+  lora    (no answer)
+[ 37.554s] HINT     nothing provisioned. The board holds this in RAM only, so a reboot clears it and the host re-syncs on connect — an empty board after a restart is normal, not a fault.
+q> [ 69.526s] SCAN     listening 6s for ce/peers/*/announce
+[ 70.394s] FOUND    acbm-1cdbd4abbc7c  (nonce 765864a9b9d7fe4b2e18ceba7bd08c19)
+
+  PEER ID                      ANNOUNCES  NONCE
+  acbm-1cdbd4abbc7c                    6  765864a9b9d7fe4b2e18ceba7bd08c19
+
+q> 

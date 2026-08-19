@@ -2,6 +2,7 @@
  *  log in with the S1 proof, and run a protobuf request/reply.
  */
 #include "qz.h"
+#include "zenoh-pico/net/session.h"   /* _zp_send_keep_alive — see qz_session_ensure */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -151,6 +152,38 @@ static void on_announce(z_loaned_sample_t *sample, void *arg)
     }
 }
 
+/* A board reboot silently kills the TCP link. The lease task eventually marks
+ * the session closed, but until 2026-08-19 every later command just timed out
+ * on the corpse and the no-reply HINT blamed old firmware — a live debug
+ * session went exactly down that wrong path. Detect the corpse up front and
+ * reconnect. Auth is per-session, so authorized services need a fresh
+ * `login` afterwards — say so instead of leaving it to be rediscovered. */
+int qz_session_ensure(qz_ctx_t *ctx)
+{
+    if (!ctx->session_open) return -1;
+    /* is_closed alone is NOT enough: measured 2026-08-19, a board reboot leaves
+     * the TLS link erroring (-0x004e on every write) yet the session object
+     * still reports open for minutes. A keep-alive probe forces a write NOW and
+     * surfaces the corpse immediately. */
+    bool b_dead = z_session_is_closed(z_loan(ctx->session));
+    if (!b_dead) {
+        /* zp_send_keep_alive() is compiled out under Z_FEATURE_MULTI_THREAD, so
+         * reach one layer down (same call the wrapper makes — api.c:2536). */
+        b_dead = _zp_send_keep_alive(_Z_RC_IN_VAL(z_loan(ctx->session))) != Z_OK;
+    }
+    if (!b_dead) return 0;
+    qz_log("HINT", "the session is DEAD — the board likely rebooted and cut the TCP link "
+                   "(a reboot also clears its RAM config). Reconnecting...");
+    qz_session_close(ctx);
+    if (qz_session_open(ctx) != 0) {
+        qz_log("HINT", "reopen failed — is the board back on the network? try `scan`.");
+        return -1;
+    }
+    qz_log("HINT", "session reopened. Authorized services need `login <password>` again "
+                   "(auth is per-session).");
+    return 0;
+}
+
 int qz_discover(qz_ctx_t *ctx, unsigned seconds)
 {
     if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
@@ -166,6 +199,7 @@ int qz_discover(qz_ctx_t *ctx, unsigned seconds)
         qz_log("ERR", "could not subscribe to the announce beacon");
         return -1;
     }
+    if (qz_session_ensure(ctx) != 0) return -1;
     qz_log("SCAN", "listening %us for ce/peers/*/announce", seconds);
     sleep(seconds);
     z_drop(z_move(sub));
@@ -323,6 +357,7 @@ static int qz_request_impl(qz_ctx_t *ctx, const char *service, qz_op_t op,
                            bool quiet, uint8_t *reply_out, size_t reply_cap, size_t *reply_len)
 {
     if (!ctx->session_open) { qz_log("ERR", "no session — run `connect` first"); return -1; }
+    if (qz_session_ensure(ctx) != 0) return -1;
     if (ctx->board[0] == '\0') { qz_log("ERR", "no board selected — run `discover` or `use <id>`"); return -1; }
 
     /* seq is the contract's transaction id: the request carries it and the reply echoes it, and
@@ -405,6 +440,15 @@ static int qz_request_impl(qz_ctx_t *ctx, const char *service, qz_op_t op,
          * (zero-timeout xQueueSend into a depth-8 queue), so a timeout does not necessarily
          * mean the request never arrived. */
         qz_log("REQ", "no reply within %us on %s", timeout_s, ack_key);
+        {
+            if (z_session_is_closed(z_loan(ctx->session)) ||
+                _zp_send_keep_alive(_Z_RC_IN_VAL(z_loan(ctx->session))) != Z_OK) {
+            qz_log("HINT", "the session DIED while waiting — the board likely rebooted. "
+                           "Re-run the command (it reconnects), then `login` again for "
+                           "authorized services.");
+            return -1;
+            }
+        }
         qz_log("HINT", "that key carries the transaction id. A board built before the id was "
                        "added replies on ce/%s/svc/%s/res/%s with no trailing chunk, which "
                        "this subscription cannot match — flash it, or subscribe .../*/%s/**",

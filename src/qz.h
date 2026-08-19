@@ -135,6 +135,8 @@ int qz_ca_enroll(const char *ca_url, const char *admin_secret, const char *id,
 int  qz_mdns_scan(qz_ctx_t *ctx, unsigned seconds);
 
 int  qz_session_open(qz_ctx_t *ctx);
+/* Reconnects a session the board's reboot killed; 0 = usable. */
+int  qz_session_ensure(qz_ctx_t *ctx);
 void qz_session_close(qz_ctx_t *ctx);
 int  qz_discover(qz_ctx_t *ctx, unsigned seconds);
 int  qz_subscribe(qz_ctx_t *ctx, const char *keyexpr, unsigned seconds);
