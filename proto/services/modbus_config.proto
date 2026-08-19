@@ -146,6 +146,32 @@ message ModbusConfigDelta {
   repeated ModbusPointDef  upsert_points    = 2;
   repeated uint32          remove_device_ids = 3;
   repeated uint32          remove_point_ids  = 4;
+
+  // --- Sync-prune (contract 0.4.3) ---
+  // A remove sent while the device is unreachable is lost forever: the host
+  // forgets the entry, the device keeps it, and no later delta ever mentions
+  // that id again. Three bench incidents grew from exactly this (POOL_FULL
+  // from zombie devices; zombie points firing failsafe long after deletion),
+  // each ending in a manual NVS wipe. Prune closes the gap by making the
+  // host's full reconciliation sync AUTHORITATIVE about what may exist.
+  //
+  // Semantics: when `prune` is true, the device — AFTER applying this delta's
+  // upserts and removes — removes every middleware-owned device whose id is
+  // not in `keep_device_ids` and every point whose id is not in
+  // `keep_point_ids`. The lists are the host's complete desired id sets for
+  // this plane, so `prune = true` with empty lists means "remove everything".
+  // The host sends prune only as the FINAL chunk of a full sync (after the
+  // upsert chunks it just pushed — their ids are therefore always kept), never
+  // on an incremental delta.
+  //
+  // Pruned ids are NOT echoed in ConfigResult (applied_ids is capped and the
+  // prune already succeeded if the RPC succeeded); the device logs one line
+  // per pruned entry instead. A pre-0.4.3 device simply ignores these fields —
+  // the sync still applies, only the pruning is skipped, which is exactly the
+  // old behaviour.
+  repeated uint32 keep_device_ids = 5;
+  repeated uint32 keep_point_ids  = 6;
+  bool            prune           = 7;
 }
 
 enum ConfigReject {

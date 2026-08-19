@@ -141,6 +141,14 @@ message BacnetConfigDelta {
   repeated BacnetPointDef  upsert_points     = 2;
   repeated uint32          remove_device_ids = 3;
   repeated uint32          remove_point_ids  = 4;
+
+  // Sync-prune (contract 0.4.3) — semantics identical to
+  // ModbusConfigDelta.keep_device_ids/keep_point_ids/prune: on prune = true
+  // the device drops every middleware-owned entry not listed. Host sends it
+  // only as the final chunk of a full reconciliation sync.
+  repeated uint32 keep_device_ids = 5;
+  repeated uint32 keep_point_ids  = 6;
+  bool            prune           = 7;
 }
 
 enum ConfigReject {

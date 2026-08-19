@@ -15,3 +15,7 @@ ce.embedded.lora.v1.ConfigResult.applied_ids          max_count:24
 ce.embedded.lora.v1.ConfigResult.rejected             max_count:24
 ce.embedded.lora.v1.LoraPointDef.name                 max_size:24
 ce.embedded.lora.v1.LoraConfig.config_hash            max_size:17
+
+# Sync-prune (0.4.3): fields reserved (no device impl yet); bounds mirror the pool.
+ce.embedded.lora.v1.LoraConfigDelta.keep_device_ids max_count:16
+ce.embedded.lora.v1.LoraConfigDelta.keep_point_ids  max_count:64

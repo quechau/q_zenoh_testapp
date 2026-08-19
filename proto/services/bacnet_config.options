@@ -19,3 +19,7 @@ ce.embedded.bacnet.v1.ConfigResult.applied_ids            max_count:24
 ce.embedded.bacnet.v1.ConfigResult.rejected               max_count:24
 ce.embedded.bacnet.v1.BacnetPointDef.name             max_size:24
 ce.embedded.bacnet.v1.BacnetConfig.config_hash        max_size:17
+
+# Sync-prune (0.4.3): keep lists bound to the full pool (snapshot caps).
+ce.embedded.bacnet.v1.BacnetConfigDelta.keep_device_ids max_count:16
+ce.embedded.bacnet.v1.BacnetConfigDelta.keep_point_ids  max_count:64

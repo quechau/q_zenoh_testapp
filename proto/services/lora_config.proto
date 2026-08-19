@@ -104,6 +104,15 @@ package ce.embedded.lora.v1;
                                             repeated LoraPointDef  upsert_points     = 2;
                                             repeated uint32        remove_device_ids = 3;
                                             repeated uint32        remove_point_ids  = 4;
+
+                                            // Sync-prune (contract 0.4.3) — same semantics as
+                                            // ModbusConfigDelta; RESERVED for LoRa: no device
+                                            // implementation yet (the queued-removal path in the
+                                            // host already covers the common case), fields exist
+                                            // so the shape stays symmetric across planes.
+                                            repeated uint32 keep_device_ids = 5;
+                                            repeated uint32 keep_point_ids  = 6;
+                                            bool            prune           = 7;
                                           }
 
                                           enum ConfigReject {
