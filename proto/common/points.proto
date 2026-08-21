@@ -1,0 +1,90 @@
+// common/points.proto — the data plane, once, for every field bus.
+//
+// READ   -> PointReadRequest in, PointValues out
+// WRITE  -> PointWrite in, WriteAck out (ack = accepted into the device cache,
+//           NOT bus-confirmed; authoritative confirmation is the COV read-back)
+// notify -> PointValues with envelope.is_notification = true
+//
+// WHY ONE COPY (contract 0.4.5, 2026-08-21)
+//
+// modbus_points.proto, bacnet_points.proto and lora_points.proto used to carry
+// these seven definitions field-for-field identically, one set per package. The
+// duplication was deliberate at the time — "each service can version
+// independently, and nanopb needs a concrete generated type per service" — and it
+// cost more than it bought: three places to edit for one change, three chances to
+// drift, and three generated types a consumer must special-case for a payload that
+// is byte-identical in all three.
+//
+// The shared shape is not an accident of history either: past the decode, a point
+// on this fabric IS an id, a number, a quality and a sequence number. Nothing about
+// a Modbus register, a BACnet object or a LoRa frame survives to this layer — that
+// knowledge lives in the CONFIG plane (modbus_config.proto et al.), which stays
+// per-protocol precisely because it is where the protocols differ.
+//
+// WIRE COMPATIBILITY: unchanged. Field numbers, field types and enum values are
+// exactly what the three per-service copies declared, so the bytes on the wire are
+// the same before and after this move; only the generated C/TS type names change
+// (ce_embedded_modbus_v1_PointValue -> ce_embedded_common_v1_PointValue). A board
+// running pre-0.4.5 firmware and a host built after it interoperate — proven on the
+// bench before reflashing (evidence: ce-common docs/evidence/proto-refactor-*).
+//
+// WHICH PLANE A FRAME BELONGS TO is carried by the KEY, not by the payload type:
+// `…/svc/modbus.points` vs `…/svc/lora.points`. That was already true — the three
+// copies were indistinguishable on the wire — this file just stops pretending
+// otherwise.
+//
+// IF ONE PLANE EVER NEEDS ITS OWN SHAPE: add the new message to that service's
+// proto and route it there. Sharing is the default, not a cage.
+
+syntax = "proto3";
+
+package ce.embedded.common.v1;
+
+// Point quality. The three planes stamp it from different evidence, and the
+// per-plane rules stay documented where they are implemented:
+//   modbus/bacnet (POLL)  Q_FAULT = the field bus read failed
+//   lora (PUSH)           Q_STALE = heard before, missed its transmit window
+//                         Q_FAULT = never heard since provisioning
+// A consumer renders the enum; it does not need to know which bus produced it.
+enum Quality {
+  Q_UNSPECIFIED = 0;
+  Q_GOOD        = 1;
+  Q_STALE       = 2;
+  Q_FAULT       = 3;
+}
+
+message PointValue {
+  uint32  point_id  = 1;
+  double  value     = 2;   // engineering value; the host applies the def's scale
+  Quality quality   = 3;
+  uint64  src_ts_ms = 4;   // device clock, informational
+  uint64  seq_no    = 5;   // per-point monotonic; LWW authority
+}
+
+message PointValues {
+  repeated PointValue values = 1;   // bounded via .options; one frame per batch
+}
+
+message PointReadRequest {
+  repeated uint32 point_ids = 1;    // empty + all=true reads everything
+  bool            all       = 2;
+}
+
+message PointWrite {
+  uint32 point_id = 1;
+  double value    = 2;
+}
+
+enum WriteReject {
+  WR_UNSPECIFIED   = 0;
+  WR_UNKNOWN_POINT = 1;
+  WR_NOT_WRITABLE  = 2;   // AI/BI, a read-only LoRa field, or not marked writable
+  WR_VALUE_RANGE   = 3;
+}
+
+message WriteAck {
+  uint32      point_id      = 1;
+  bool        accepted      = 2;
+  double      applied_value = 3;
+  WriteReject reason        = 4;   // meaningful when accepted == false
+}

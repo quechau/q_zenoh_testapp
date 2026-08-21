@@ -1,0 +1,54 @@
+// common/config.proto — the verdict half of every config plane, once.
+//
+// A config WRITE is a delta: the device applies each item independently and
+// answers per item. The delta itself is protocol-specific (a Modbus device has a
+// unit id, a LoRa device has a radio address), but the ANSWER never was: an id
+// either applied or it was rejected for one of six reasons that every plane
+// shares. modbus_config.proto, bacnet_config.proto and lora_config.proto each
+// declared that answer identically; it lives here now (contract 0.4.5).
+//
+// PollClass is here for the same reason: cadence is a scheduler concept, not a
+// protocol one, and both polled planes (modbus, bacnet) declared the same four
+// values. LoRa does not poll and simply does not use it.
+//
+// WIRE COMPATIBILITY: unchanged — same field numbers, same enum values as the
+// three copies this replaces. Only the generated type names move
+// (ce_embedded_modbus_v1_ConfigResult -> ce_embedded_common_v1_ConfigResult).
+
+syntax = "proto3";
+
+package ce.embedded.common.v1;
+
+// Why an item was refused. The per-plane meaning of each value is documented in
+// that plane's config proto (a "duplicate" is a unit id on Modbus, a MAC on
+// BACnet, a dev_addr on LoRa) — the CATEGORIES are the same everywhere, which is
+// what lets one host log and one UI render all three.
+enum ConfigReject {
+  REJ_UNSPECIFIED = 0;
+  REJ_POOL_FULL   = 1;   // device/point pool exhausted
+  REJ_IFACE_ROLE  = 2;   // the plane's interface is absent or has another role
+  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
+  REJ_DUPLICATE   = 4;   // duplicate device address / duplicate point id
+  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
+  REJ_INVALID     = 6;   // failed device-side field validation
+}
+
+message ConfigResultItem {
+  uint32       id     = 1;
+  ConfigReject reason = 2;
+}
+
+message ConfigResult {
+  repeated uint32           applied_ids = 1;
+  repeated ConfigResultItem rejected    = 2;
+}
+
+// Poll cadence class for the POLLED planes (modbus, bacnet). The device maps a
+// class to a period; the host picks a class so the two never argue about
+// milliseconds. A PUSH plane (lora) ignores it.
+enum PollClass {
+  POLL_UNSPECIFIED = 0;
+  POLL_FAST        = 1;
+  POLL_NORMAL      = 2;
+  POLL_SLOW        = 3;
+}

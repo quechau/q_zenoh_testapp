@@ -47,23 +47,26 @@ ROUTES = [
     # logout (ADR-016, app_zenoh.c). The reply carries its verdict in `error`, not a payload.
     ("system.auth",       "OP_EXECUTE",   "@proof",                         "@empty"),
 
-    ("modbus.points",     "OP_READ",      "modbus.PointReadRequest",        "modbus.PointValues"),
-    ("modbus.points",     "OP_WRITE",     "modbus.PointWrite",              "modbus.WriteAck"),
-    ("modbus.points",     "OP_SUBSCRIBE", "@unknown",                       "modbus.PointValues"),
+    # The data plane is ONE schema for all three field buses (contract 0.4.5) — the key
+    # says which plane a frame belongs to, the payload shape never did. The config plane
+    # stays per-protocol; only its verdict is shared.
+    ("modbus.points",     "OP_READ",      "common.PointReadRequest",        "common.PointValues"),
+    ("modbus.points",     "OP_WRITE",     "common.PointWrite",              "common.WriteAck"),
+    ("modbus.points",     "OP_SUBSCRIBE", "@unknown",                       "common.PointValues"),
     ("modbus.config",     "OP_READ",      "@empty",                         "modbus.ModbusConfig"),
-    ("modbus.config",     "OP_WRITE",     "modbus.ModbusConfigDelta",       "modbus.ConfigResult"),
+    ("modbus.config",     "OP_WRITE",     "modbus.ModbusConfigDelta",       "common.ConfigResult"),
 
-    ("bacnet.points",     "OP_READ",      "bacnet.PointReadRequest",        "bacnet.PointValues"),
-    ("bacnet.points",     "OP_WRITE",     "bacnet.PointWrite",              "bacnet.WriteAck"),
-    ("bacnet.points",     "OP_SUBSCRIBE", "@unknown",                       "bacnet.PointValues"),
+    ("bacnet.points",     "OP_READ",      "common.PointReadRequest",        "common.PointValues"),
+    ("bacnet.points",     "OP_WRITE",     "common.PointWrite",              "common.WriteAck"),
+    ("bacnet.points",     "OP_SUBSCRIBE", "@unknown",                       "common.PointValues"),
     ("bacnet.config",     "OP_READ",      "@empty",                         "bacnet.BacnetConfig"),
-    ("bacnet.config",     "OP_WRITE",     "bacnet.BacnetConfigDelta",       "bacnet.ConfigResult"),
+    ("bacnet.config",     "OP_WRITE",     "bacnet.BacnetConfigDelta",       "common.ConfigResult"),
 
-    ("lora.points",       "OP_READ",      "lora.PointReadRequest",          "lora.PointValues"),
-    ("lora.points",       "OP_WRITE",     "lora.PointWrite",                "lora.WriteAck"),
-    ("lora.points",       "OP_SUBSCRIBE", "@unknown",                       "lora.PointValues"),
+    ("lora.points",       "OP_READ",      "common.PointReadRequest",        "common.PointValues"),
+    ("lora.points",       "OP_WRITE",     "common.PointWrite",              "common.WriteAck"),
+    ("lora.points",       "OP_SUBSCRIBE", "@unknown",                       "common.PointValues"),
     ("lora.config",       "OP_READ",      "@empty",                         "lora.LoraConfig"),
-    ("lora.config",       "OP_WRITE",     "lora.LoraConfigDelta",           "lora.ConfigResult"),
+    ("lora.config",       "OP_WRITE",     "lora.LoraConfigDelta",           "common.ConfigResult"),
 ]
 
 SCALARS = {
@@ -363,7 +366,11 @@ def main():
         # and its own copy of nothing else from this repo. A prefix keeps the two from reading
         # like foreign code in each other's tree.
         prefix = sys.argv[4] if len(sys.argv) > 4 else "qz"
-    files = sorted(proto_dir.glob("*.proto")) + sorted(proto_dir.glob("services/*.proto"))
+    # common/ carries the definitions every service shares (contract 0.4.5): one data
+    # plane and one config verdict instead of three field-for-field copies. It must be
+    # parsed too, or every route that points at a shared message resolves to nothing.
+    files = (sorted(proto_dir.glob("*.proto")) + sorted(proto_dir.glob("common/*.proto"))
+             + sorted(proto_dir.glob("services/*.proto")))
     if not files:
         sys.exit(f"no .proto files under {proto_dir}")
 

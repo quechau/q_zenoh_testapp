@@ -11,8 +11,6 @@ ce.embedded.lora.v1.LoraConfigDelta.upsert_devices    max_count:8
 ce.embedded.lora.v1.LoraConfigDelta.upsert_points     max_count:16
 ce.embedded.lora.v1.LoraConfigDelta.remove_device_ids max_count:8
 ce.embedded.lora.v1.LoraConfigDelta.remove_point_ids  max_count:16
-ce.embedded.lora.v1.ConfigResult.applied_ids          max_count:24
-ce.embedded.lora.v1.ConfigResult.rejected             max_count:24
 ce.embedded.lora.v1.LoraPointDef.name                 max_size:24
 ce.embedded.lora.v1.LoraConfig.config_hash            max_size:17
 

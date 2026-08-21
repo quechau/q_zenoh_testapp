@@ -1,0 +1,4 @@
+# Bounds for the shared config verdict. Identical in the three per-service copies
+# this replaces (24 applied + 24 rejected per answer).
+ce.embedded.common.v1.ConfigResult.applied_ids  max_count:24
+ce.embedded.common.v1.ConfigResult.rejected     max_count:24

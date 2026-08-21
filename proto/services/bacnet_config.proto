@@ -30,6 +30,11 @@ syntax = "proto3";
 
 package ce.embedded.bacnet.v1;
 
+// Shared with the other config planes: the per-item WRITE verdict, and (for the
+// polled planes) the cadence class. Only what is specific to this protocol is
+// declared below.
+import "common/config.proto";
+
 // ---------------------------------------------------------------------------
 // Definitions
 // ---------------------------------------------------------------------------
@@ -45,13 +50,6 @@ enum BacnetObjectType {
   OBJ_BI          = 4;   // Binary Input  — read-only, see `writable`
   OBJ_BO          = 5;   // Binary Output
   OBJ_BV          = 6;   // Binary Value
-}
-
-enum PollClass {
-  POLL_UNSPECIFIED = 0;
-  POLL_FAST        = 1;
-  POLL_NORMAL      = 2;
-  POLL_SLOW        = 3;
 }
 
 // One MS/TP target on the board's RS485 segment.
@@ -90,7 +88,7 @@ message BacnetPointDef {
   // writable when that is the intent.
   bool             writable     = 6;
 
-  PollClass        poll_class   = 7;
+  ce.embedded.common.v1.PollClass        poll_class   = 7;
 
   // Operator-facing display name (the wiresheet component's name, e.g.
   // "relay6"). Host-owned and purely descriptive — the board stores it and
@@ -151,22 +149,7 @@ message BacnetConfigDelta {
   bool            prune           = 7;
 }
 
-enum ConfigReject {
-  REJ_UNSPECIFIED = 0;
-  REJ_POOL_FULL   = 1;   // device point/device pool exhausted
-  REJ_IFACE_ROLE  = 2;   // no RS485 port is configured for BACnet MS/TP
-  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
-  REJ_DUPLICATE   = 4;   // duplicate mac / duplicate point id
-  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
-  REJ_INVALID     = 6;   // failed device-side field validation
-}
-
-message ConfigResultItem {
-  uint32       id     = 1;
-  ConfigReject reason = 2;
-}
-
-message ConfigResult {
-  repeated uint32           applied_ids = 1;
-  repeated ConfigResultItem rejected    = 2;
-}
+// The WRITE verdict is shared with every other config plane — see
+// common/config.proto (ConfigResult / ConfigResultItem / ConfigReject).
+// The per-plane meaning of a rejection (a "duplicate" here is an MS/TP MAC, or a
+// point id) is documented with ConfigReject in common/config.proto.

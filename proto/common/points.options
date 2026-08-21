@@ -1,0 +1,5 @@
+# Bounds for the shared data plane. All three services declared these identically
+# (32 values per frame, 32 ids per read) — one copy now, same numbers, so the
+# generated struct sizes on the device are byte-for-byte what they were.
+ce.embedded.common.v1.PointValues.values          max_count:32
+ce.embedded.common.v1.PointReadRequest.point_ids  max_count:32

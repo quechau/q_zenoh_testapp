@@ -17,13 +17,13 @@ envelope.proto ............... the transport. Every packet in both directions.
 │
 └── payload (bytes) ......... opaque here. Its type is decided by service_id + op.
     │
+    ├── common/points.proto ....... modbus.points | bacnet.points | lora.points
+    │                                                    READ / WRITE / notify
+    ├── common/config.proto ....... the WRITE verdict of every config plane
     ├── service_boardinfo.proto ... system.boardinfo     READ only
     ├── modbus_config.proto ....... modbus.config        READ / WRITE
-    ├── modbus_points.proto ....... modbus.points        READ / WRITE / notify
     ├── bacnet_config.proto ....... bacnet.config        READ / WRITE
-    ├── bacnet_points.proto ....... bacnet.points        READ / WRITE / notify
-    ├── lora_config.proto ......... lora.config          READ / WRITE
-    └── lora_points.proto ......... lora.points          READ / WRITE / notify
+    └── lora_config.proto ......... lora.config          READ / WRITE
 ```
 
 **The envelope does not name the payload's type.** `RequestEnvelope.payload` is `bytes`. A
@@ -34,12 +34,15 @@ Engine's (`ce-edgelink` `packet_trace.cpp`). One generator, three consumers — 
 name a field identically or they are all wrong together, so a name mismatch in a dump
 points at the contract, never at a tracer.
 
-**The three field buses are deliberately identical past the decode.** `modbus_points.proto`,
-`bacnet_points.proto` and `lora_points.proto` are field-for-field the same: `PointValue`,
-`PointValues`, `PointReadRequest`, `PointWrite`, `WriteAck`, `Quality`, `WriteReject`. They are
-separate packages so each can version independently and so nanopb gets a concrete type per
-service — not because a point means anything different. Past the field bus a point is an id, a
-number and a quality, and a consumer needs no protocol knowledge to render one.
+**The three field buses share ONE data plane.** Past the field bus a point is an id, a number
+and a quality — nothing protocol-specific survives the decode — so `PointValue`, `PointValues`,
+`PointReadRequest`, `PointWrite`, `WriteAck`, `Quality` and `WriteReject` live once, in
+`common/points.proto` (`ce.embedded.common.v1`). Until contract 0.4.5 each service carried its
+own field-for-field copy; the copies were byte-identical on the wire, so nothing about a frame
+changed when they were merged — only the type names a decoder prints. **Which plane a frame
+belongs to is carried by the KEY** (`…/svc/modbus.points` vs `…/svc/lora.points`), never by the
+payload type. If one plane ever needs a shape of its own, it declares it in its own proto and
+the routing table sends it there.
 
 The **config** protos are where the buses genuinely differ, because that is where a device is
 addressed:

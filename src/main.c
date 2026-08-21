@@ -125,8 +125,12 @@ static int need_session(qz_ctx_t *ctx)
 
 /* The three field-bus services are the same shape with different leaf messages, so the
  * commands below are written once and the message is looked up per protocol. Names are built
- * fully qualified — PointWrite exists in all three packages, and a suffix match would pick
- * whichever sorted first. */
+ * fully qualified: a suffix match would pick whichever package sorted first.
+ *
+ * Since contract 0.4.5 the DATA plane is one shared schema (ce.embedded.common.v1) — the
+ * three per-service copies of PointValue/PointWrite/... were field-for-field identical. A
+ * shape carrying the protocol name in it (`%sConfig`, `%sPointDef`) still lives in that
+ * protocol's package; a bare shape is the shared one. */
 static const qz_pmsg_t *msg_for(const char *proto, const char *shape)
 {
     char name[128], Proto[16];
@@ -137,7 +141,7 @@ static const qz_pmsg_t *msg_for(const char *proto, const char *shape)
         snprintf(leaf, sizeof leaf, shape, Proto);
         snprintf(name, sizeof name, "ce.embedded.%s.v1.%s", proto, leaf);
     } else {
-        snprintf(name, sizeof name, "ce.embedded.%s.v1.%s", proto, shape);
+        snprintf(name, sizeof name, "ce.embedded.common.v1.%s", shape);
     }
     const qz_pmsg_t *m = qz_msg_find(name);
     if (m == NULL) qz_log("ERR", "the contract has no %s", name);

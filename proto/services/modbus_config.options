@@ -7,8 +7,6 @@ ce.embedded.modbus.v1.ModbusConfigDelta.upsert_devices    max_count:8
 ce.embedded.modbus.v1.ModbusConfigDelta.upsert_points     max_count:16
 ce.embedded.modbus.v1.ModbusConfigDelta.remove_device_ids max_count:8
 ce.embedded.modbus.v1.ModbusConfigDelta.remove_point_ids  max_count:16
-ce.embedded.modbus.v1.ConfigResult.applied_ids        max_count:24
-ce.embedded.modbus.v1.ConfigResult.rejected           max_count:24
 ce.embedded.modbus.v1.ModbusPointDef.name             max_size:24
 ce.embedded.modbus.v1.ModbusConfig.config_hash        max_size:17
 

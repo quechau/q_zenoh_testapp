@@ -1,4 +1,4 @@
-    // lora_config.proto — `lora.config` READ/WRITE schema.
+// lora_config.proto — `lora.config` READ/WRITE schema.
 //
 // Carried inside RequestEnvelope.payload / ResponseEnvelope.payload.
 // READ  -> LoraConfig (full middleware-owned snapshot on the device)
@@ -27,129 +27,119 @@ syntax = "proto3";
 
 package ce.embedded.lora.v1;
 
+// The WRITE verdict (ConfigResult / ConfigResultItem / ConfigReject) is shared —
+// see common/config.proto. It is not imported here: no FIELD in this file
+// references it (the response type comes from the service routing table), and an
+// unused import is a build warning on every regeneration.
+
 // ---------------------------------------------------------------------------
-                                          // Definitions
-                                          // ---------------------------------------------------------------------------
+// Definitions
+// ---------------------------------------------------------------------------
 
-                                          // Which field of a device's frame this point carries. A field is a decoded
-                                          // TLV value of the sensor's payload, NOT an offset: the products in this
-                                          // family (Droplet V2, optical power meter) send different keys in different
-                                          // orders, and the board maps each key to the field below. RSSI/SNR/
-                                          // PACKET_COUNT are radio metadata stamped by the receiver, not payload.
-                                          //
-                                          // A device only ever populates the fields it actually transmits; a point
-                                          // bound to a field its device never sends stays Q_FAULT ("never heard"),
-                                          // which is the intended way to notice a wrong pick.
-                                          enum LoraField {
-                                            FIELD_UNSPECIFIED = 0;
-                                            FIELD_TEMPERATURE = 1;   // degrees C   (Droplet V2)
-                                            FIELD_PRESSURE    = 2;   // kPa         (reserved, no product sends it yet)
-                                            FIELD_HUMIDITY    = 3;   // percent     (Droplet V2)
-                                            FIELD_LUX         = 4;   // lux
-                                            FIELD_BATTERY     = 5;   // volts       (whole family)
-                                            FIELD_PACKET_COUNT = 6;  // frames RECEIVED since provision/reset (board-side)
-                                            FIELD_RSSI        = 7;   // dBm, receiver-stamped
-                                            FIELD_SNR         = 8;   // dB, receiver-stamped
-                                            // Cumulative pulse total of the optical power meter. Carried as a float
-                                            // like every other point, so it counts single pulses exactly up to 2^24
-                                            // (16,777,216) and quantises above that — the board logs the exact u64.
-                                            FIELD_PULSE_COUNT = 9;
-                                            // The DEVICE's own transmit counter, as opposed to FIELD_PACKET_COUNT
-                                            // which counts what arrived. The difference between the two is the link
-                                            // loss rate.
-                                            FIELD_PACKET_ID   = 10;
-                                            // The device's own transmit period in seconds, as it reports it. Not
-                                            // board configuration — the sensor decides, and this is the only way
-                                            // the host learns how often it is supposed to hear from it (which is
-                                            // what makes a STALE quality interpretable rather than alarming).
-                                            FIELD_INTERVAL    = 11;
-                                            // Actuator channels (valve) land in a later revision; they will extend this
-                                            // enum rather than introduce a second addressing scheme.
-                                          }
-
-                                          // One LoRaRaw device the board listens for.
-                                          //
-                                          // There is no discovery: the sensor broadcasts on its own schedule and the
-                                          // address must be known up front (it is printed by the sensor at boot). A
-                                          // wrong address presents as a point that never leaves its initial fault —
-                                          // same failure shape as a wrong MS/TP MAC.
-                                          message LoraDeviceDef {
-                                            uint32 device_id = 1;   // middleware-owned id (the host component uid)
-                                            uint32 dev_addr  = 2;   // 32-bit LoRaRaw address, e.g. 0x6CC06351
-                                            bool   enabled   = 3;
-                                          }
-
-                                          message LoraPointDef {
-                                            uint32    point_id   = 1;
-                                            uint32    device_ref = 2;   // LoraDeviceDef.device_id
-                                            LoraField field      = 3;
-
-                                            // engineering = decoded * scale (0 forbidden; treated as 1). The board
-                                            // already applies the frame's fixed decode (u16/100 etc.); scale exists for
-                                            // unit conversion on the host, normally 1.
-                                            float     scale      = 4;
-
-                                            // Droplet fields are read-only; the board rejects writes regardless of this
-                                            // flag (decided by the FIELD, like BACnet decides by object type). Reserved
-                                            // for actuator channels.
-                                            bool      writable   = 5;
-
-                                            // Operator-facing display name (the wiresheet component's name). Same
-                                            // semantics and bound as ModbusPointDef.name / BacnetPointDef.name.
-                                            string    name       = 6;
-                                          }
-
-                                          // ---------------------------------------------------------------------------
-                                          // READ response — full snapshot of middleware-owned config on the device.
-                                          // ---------------------------------------------------------------------------
-
-                                          message LoraConfig {
-                                            repeated LoraDeviceDef devices = 1;   // bounded via .options
-                                            repeated LoraPointDef  points  = 2;
-
-                                            // Fingerprint of the config this device has stored — opaque, compared only for
-                                            // equality against a value read from this same device earlier. Empty ⇒ no
-                                            // persistence, so the host must push unconditionally. Full rules, including why
-                                            // the encoding is canonicalised by id, are in modbus_config.proto.
-                                            string config_hash = 3;
-                                          }
-
-                                          // ---------------------------------------------------------------------------
-                                          // WRITE request/response — delta-only, per-item atomic (no replaceAll).
-                                          // ---------------------------------------------------------------------------
-
-                                          message LoraConfigDelta {
-                                            repeated LoraDeviceDef upsert_devices    = 1;
-                                            repeated LoraPointDef  upsert_points     = 2;
-                                            repeated uint32        remove_device_ids = 3;
-                                            repeated uint32        remove_point_ids  = 4;
-
-                                            // Sync-prune (contract 0.4.3) — same semantics as
-                                            // ModbusConfigDelta; RESERVED for LoRa: no device
-                                            // implementation yet (the queued-removal path in the
-                                            // host already covers the common case), fields exist
-                                            // so the shape stays symmetric across planes.
-                                            repeated uint32 keep_device_ids = 5;
-                                            repeated uint32 keep_point_ids  = 6;
-                                            bool            prune           = 7;
-                                          }
-
-                                          enum ConfigReject {
-                                            REJ_UNSPECIFIED = 0;
-  REJ_POOL_FULL   = 1;   // device/point pool exhausted
-  REJ_IFACE_ROLE  = 2;   // LoRa radio not present/enabled on this board
-  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
-  REJ_DUPLICATE   = 4;   // duplicate dev_addr / duplicate point id
-  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
-  REJ_INVALID     = 6;   // failed device-side field validation
+// Which field of a device's frame this point carries. A field is a decoded
+// TLV value of the sensor's payload, NOT an offset: the products in this
+// family (Droplet V2, optical power meter) send different keys in different
+// orders, and the board maps each key to the field below. RSSI/SNR/
+// PACKET_COUNT are radio metadata stamped by the receiver, not payload.
+//
+// A device only ever populates the fields it actually transmits; a point
+// bound to a field its device never sends stays Q_FAULT ("never heard"),
+// which is the intended way to notice a wrong pick.
+enum LoraField {
+  FIELD_UNSPECIFIED = 0;
+  FIELD_TEMPERATURE = 1;   // degrees C   (Droplet V2)
+  FIELD_PRESSURE    = 2;   // kPa         (reserved, no product sends it yet)
+  FIELD_HUMIDITY    = 3;   // percent     (Droplet V2)
+  FIELD_LUX         = 4;   // lux
+  FIELD_BATTERY     = 5;   // volts       (whole family)
+  FIELD_PACKET_COUNT = 6;  // frames RECEIVED since provision/reset (board-side)
+  FIELD_RSSI        = 7;   // dBm, receiver-stamped
+  FIELD_SNR         = 8;   // dB, receiver-stamped
+  // Cumulative pulse total of the optical power meter. Carried as a float
+  // like every other point, so it counts single pulses exactly up to 2^24
+  // (16,777,216) and quantises above that — the board logs the exact u64.
+  FIELD_PULSE_COUNT = 9;
+  // The DEVICE's own transmit counter, as opposed to FIELD_PACKET_COUNT
+  // which counts what arrived. The difference between the two is the link
+  // loss rate.
+  FIELD_PACKET_ID   = 10;
+  // The device's own transmit period in seconds, as it reports it. Not
+  // board configuration — the sensor decides, and this is the only way
+  // the host learns how often it is supposed to hear from it (which is
+  // what makes a STALE quality interpretable rather than alarming).
+  FIELD_INTERVAL    = 11;
+  // Actuator channels (valve) land in a later revision; they will extend this
+  // enum rather than introduce a second addressing scheme.
 }
 
-message ConfigResultItem {
-  uint32       id     = 1;
-  ConfigReject reason = 2;
+// One LoRaRaw device the board listens for.
+//
+// There is no discovery: the sensor broadcasts on its own schedule and the
+// address must be known up front (it is printed by the sensor at boot). A
+// wrong address presents as a point that never leaves its initial fault —
+// same failure shape as a wrong MS/TP MAC.
+message LoraDeviceDef {
+  uint32 device_id = 1;   // middleware-owned id (the host component uid)
+  uint32 dev_addr  = 2;   // 32-bit LoRaRaw address, e.g. 0x6CC06351
+  bool   enabled   = 3;
 }
 
-message ConfigResult {
-  repeated uint32           applied_ids = 1;
-  repeated ConfigResultItem rejected    = 2;
+message LoraPointDef {
+  uint32    point_id   = 1;
+  uint32    device_ref = 2;   // LoraDeviceDef.device_id
+  LoraField field      = 3;
+
+  // engineering = decoded * scale (0 forbidden; treated as 1). The board
+  // already applies the frame's fixed decode (u16/100 etc.); scale exists for
+  // unit conversion on the host, normally 1.
+  float     scale      = 4;
+
+  // Droplet fields are read-only; the board rejects writes regardless of this
+  // flag (decided by the FIELD, like BACnet decides by object type). Reserved
+  // for actuator channels.
+  bool      writable   = 5;
+
+  // Operator-facing display name (the wiresheet component's name). Same
+  // semantics and bound as ModbusPointDef.name / BacnetPointDef.name.
+  string    name       = 6;
 }
+
+// ---------------------------------------------------------------------------
+// READ response — full snapshot of middleware-owned config on the device.
+// ---------------------------------------------------------------------------
+
+message LoraConfig {
+  repeated LoraDeviceDef devices = 1;   // bounded via .options
+  repeated LoraPointDef  points  = 2;
+
+  // Fingerprint of the config this device has stored — opaque, compared only for
+  // equality against a value read from this same device earlier. Empty ⇒ no
+  // persistence, so the host must push unconditionally. Full rules, including why
+  // the encoding is canonicalised by id, are in modbus_config.proto.
+  string config_hash = 3;
+}
+
+// ---------------------------------------------------------------------------
+// WRITE request/response — delta-only, per-item atomic (no replaceAll).
+// ---------------------------------------------------------------------------
+
+message LoraConfigDelta {
+  repeated LoraDeviceDef upsert_devices    = 1;
+  repeated LoraPointDef  upsert_points     = 2;
+  repeated uint32        remove_device_ids = 3;
+  repeated uint32        remove_point_ids  = 4;
+
+  // Sync-prune (contract 0.4.3) — same semantics as
+  // ModbusConfigDelta; RESERVED for LoRa: no device
+  // implementation yet (the queued-removal path in the
+  // host already covers the common case), fields exist
+  // so the shape stays symmetric across planes.
+  repeated uint32 keep_device_ids = 5;
+  repeated uint32 keep_point_ids  = 6;
+  bool            prune           = 7;
+}
+
+// The WRITE verdict is shared with every other config plane — see
+// common/config.proto (ConfigResult / ConfigResultItem / ConfigReject).
+// The per-plane meaning of a rejection (a "duplicate" here is a radio dev_addr, or
+// a point id) is documented with ConfigReject in common/config.proto.

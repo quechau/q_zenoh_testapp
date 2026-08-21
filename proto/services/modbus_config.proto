@@ -8,6 +8,11 @@ syntax = "proto3";
 
 package ce.embedded.modbus.v1;
 
+// Shared with the other config planes: the per-item WRITE verdict, and (for the
+// polled planes) the cadence class. Only what is specific to this protocol is
+// declared below.
+import "common/config.proto";
+
 // ---------------------------------------------------------------------------
 // Definitions
 // ---------------------------------------------------------------------------
@@ -47,13 +52,6 @@ enum DataType {
   DT_BIT         = 6;
 }
 
-enum PollClass {
-  POLL_UNSPECIFIED = 0;
-  POLL_FAST        = 1;
-  POLL_NORMAL      = 2;
-  POLL_SLOW        = 3;
-}
-
 message ModbusDeviceDef {
   uint32          device_id = 1;   // middleware-owned id (reserved range on device)
   uint32          unit_id   = 2;   // Modbus slave address 1..247 (wiresheet-selectable)
@@ -75,7 +73,7 @@ message ModbusPointDef {
   DataType     data_type  = 5;
   float        scale      = 6;     // engineering = raw * scale (0 forbidden)
   bool         writable   = 7;
-  PollClass    poll_class = 8;
+  ce.embedded.common.v1.PollClass    poll_class = 8;
 
   // Operator-facing display name (the wiresheet component's name, e.g.
   // "target-temp"). Host-owned and purely descriptive: the board never parses
@@ -174,22 +172,7 @@ message ModbusConfigDelta {
   bool            prune           = 7;
 }
 
-enum ConfigReject {
-  REJ_UNSPECIFIED = 0;
-  REJ_POOL_FULL   = 1;   // device point/device pool exhausted
-  REJ_IFACE_ROLE  = 2;   // interface param role is not modbus-master
-  REJ_BAD_ID      = 3;   // id outside the middleware-reserved range
-  REJ_DUPLICATE   = 4;   // duplicate unit id on interface / duplicate point id
-  REJ_UNKNOWN_REF = 5;   // point references an unknown device_id
-  REJ_INVALID     = 6;   // failed device-side field validation
-}
-
-message ConfigResultItem {
-  uint32       id     = 1;
-  ConfigReject reason = 2;
-}
-
-message ConfigResult {
-  repeated uint32           applied_ids = 1;
-  repeated ConfigResultItem rejected    = 2;
-}
+// The WRITE verdict is shared with every other config plane — see
+// common/config.proto (ConfigResult / ConfigResultItem / ConfigReject).
+// The per-plane meaning of a rejection (a "duplicate" here is a unit id on an
+// interface, or a point id) is documented with ConfigReject in common/config.proto.
