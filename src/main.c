@@ -105,7 +105,15 @@ static int need_session(qz_ctx_t *ctx)
          * board answers an mDNS browse, and its address comes from DHCP so a remembered one
          * goes stale anyway. */
         qz_log("SCAN", "no endpoint set — looking for boards on the LAN first");
-        if (qz_mdns_scan(ctx, 4) <= 0 || ctx->endpoint[0] == '\0') {
+        const int n = qz_mdns_scan(ctx, 4);
+        if (n > 1 && ctx->endpoint[0] == '\0') {
+            /* Found several: that is not "no board found" (which is what this used to say,
+             * with two boards listed directly above it) — it is a choice to make. */
+            qz_log("ERR", "%d boards found — pick one: `connect <address|peer-id>`, or start "
+                          "with --endpoint tls/<host>:7447", n);
+            return -1;
+        }
+        if (n <= 0 || ctx->endpoint[0] == '\0') {
             qz_log("ERR", "no board found. Pass --endpoint tls/<host>:7447, or run `scan` and "
                           "then `connect <address>`.");
             return -1;
@@ -160,7 +168,20 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
         return 0;
     }
     if (strcmp(cmd, "connect") == 0) {
-        if (argc > 1) snprintf(ctx->endpoint, sizeof(ctx->endpoint), "%s", argv[1]);
+        if (argc > 1) {
+            /* Accept a peer id as well as an address: after a scan the operator has the ids
+             * in front of them, and retyping tls/<ip>:7447 for the right one is busywork. */
+            const char *want = argv[1];
+            const char *addr = want;
+            for (size_t i = 0; i < ctx->board_count; i++) {
+                if (strcmp(ctx->boards[i].peer_id, want) == 0) {
+                    addr = ctx->boards[i].addr;
+                    snprintf(ctx->board, sizeof(ctx->board), "%s", ctx->boards[i].peer_id);
+                    break;
+                }
+            }
+            snprintf(ctx->endpoint, sizeof(ctx->endpoint), "%s", addr);
+        }
         return qz_session_open(ctx);
     }
     if (strcmp(cmd, "disconnect") == 0) { qz_session_close(ctx); return 0; }
@@ -190,7 +211,15 @@ int qz_run_command(qz_ctx_t *ctx, int argc, char **argv)
     if (strcmp(cmd, "login") == 0) {
         if (argc < 2) { qz_log("ERR", "login <password>"); return -1; }
         if (need_session(ctx) != 0) return -1;
-        if (ctx->board_count == 0) qz_discover(ctx, 4);   /* the nonce lives in the announce */
+        /* The nonce lives in the announce, per board and per boot. Auto-discover when the
+         * SELECTED board has none — the old check was `board_count == 0`, which skipped the
+         * discover whenever a scan had found other boards, so `login` failed on a bench with
+         * two boards until the operator typed `discover` by hand. */
+        bool have_nonce = false;
+        for (size_t i = 0; i < ctx->board_count; i++)
+            if (strcmp(ctx->boards[i].peer_id, ctx->board) == 0 && ctx->boards[i].nonce[0] != '\0')
+                have_nonce = true;
+        if (!have_nonce) qz_discover(ctx, 4);
         return qz_login(ctx, argv[1]);
     }
     if (strcmp(cmd, "logout") == 0) {

@@ -59,6 +59,88 @@ static size_t dns_name(uint8_t *out, const char *name)
     return n;
 }
 
+/** Builds the PTR question for `_zenoh._tcp.local`. Same packet for multicast and unicast. */
+static size_t ptr_query(uint8_t *q, size_t cap)
+{
+    if (cap < 64) return 0;
+    memset(q, 0, 12);
+    q[5] = 1;                                   /* qdcount = 1 */
+    size_t n = 12;
+    char fqdn[128];
+    snprintf(fqdn, sizeof(fqdn), "%s.local", SERVICE);
+    n += dns_name(q + n, fqdn);
+    q[n++] = 0x00; q[n++] = 0x0C;               /* PTR */
+    q[n++] = 0x00; q[n++] = 0x01;               /* IN  */
+    return n;
+}
+
+/** First `acbm-…`/`acbl-…` label in a DNS payload. Deliberately a scrape and not a parser:
+ *  the id appears in the PTR target, the SRV owner and the TXT `peer=` — any of them will do,
+ *  and a full name-compression parser buys nothing here. */
+static int scrape_id(const uint8_t *buf, size_t len, char *out, size_t outsz)
+{
+    static const char *prefixes[] = { "acbm-", "acbl-" };
+    for (size_t k = 0; k < 2; k++) {
+        size_t pl = strlen(prefixes[k]);
+        for (size_t i = 0; i + pl < len; i++) {
+            if (memcmp(buf + i, prefixes[k], pl) != 0) continue;
+            size_t j = 0;
+            while (i + j < len && j + 1 < outsz) {
+                uint8_t c = buf[i + j];
+                if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) break;
+                out[j++] = (char)c;
+            }
+            out[j] = '\0';
+            if (j > pl) return 0;
+        }
+    }
+    return -1;
+}
+
+/** Asks ONE host, over unicast, who it is: `_zenoh._tcp.local` PTR straight to <ip>:5353.
+ *
+ * The multicast browse cannot say WHICH address owns a name, and on this bench it often says
+ * nothing at all — a board that has been up for hours stops answering multicast entirely
+ * (measured 2026-08-21: zero multicast replies while a unicast query to the same board came
+ * back instantly with its A record). Asking each swept address directly fixes both problems
+ * at once: the answer is by definition the owner's, and it works with N boards, where the old
+ * "one name + one address, so they must be the same board" pairing gave up and printed
+ * "(unknown)" for every board. */
+static int peer_id_unicast(const char *ip, char *out, size_t outsz, unsigned timeout_ms)
+{
+    int sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) return -1;
+    struct timeval tv = { .tv_sec = timeout_ms / 1000, .tv_usec = (timeout_ms % 1000) * 1000 };
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t q[256];
+    size_t n = ptr_query(q, sizeof(q));
+    struct sockaddr_in to;
+    memset(&to, 0, sizeof(to));
+    to.sin_family = AF_INET;
+    to.sin_port = htons(MDNS_PORT);
+    if (n == 0 || inet_pton(AF_INET, ip, &to.sin_addr) != 1 ||
+        sendto(sock, q, n, 0, (struct sockaddr *)&to, sizeof(to)) < 0) {
+        close(sock);
+        return -1;
+    }
+    int rc = -1;
+    uint64_t deadline = qz_now_ms() + timeout_ms;
+    while (qz_now_ms() < deadline) {
+        uint8_t buf[2048];
+        struct sockaddr_in from;
+        socklen_t fl = sizeof(from);
+        ssize_t got = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fl);
+        if (got <= 0) break;
+        char fs[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &from.sin_addr, fs, sizeof(fs));
+        if (strcmp(fs, ip) != 0) continue;      /* only the owner's own answer counts */
+        if (scrape_id(buf, (size_t)got, out, outsz) == 0) { rc = 0; break; }
+    }
+    close(sock);
+    return rc;
+}
+
 /** Collects peer ids seen in mDNS replies. Addresses are deliberately NOT taken from here. */
 static size_t mdns_peer_ids(char ids[][QZ_MAX_ID], size_t max_ids, unsigned seconds)
 {
@@ -78,14 +160,8 @@ static size_t mdns_peer_ids(char ids[][QZ_MAX_ID], size_t max_ids, unsigned seco
     if (bind(sock, (struct sockaddr *)&local, sizeof(local)) < 0) { close(sock); return 0; }
 
     uint8_t q[256];
-    memset(q, 0, 12);
-    q[5] = 1;                                   /* qdcount = 1 */
-    size_t n = 12;
-    char fqdn[128];
-    snprintf(fqdn, sizeof(fqdn), "%s.local", SERVICE);
-    n += dns_name(q + n, fqdn);
-    q[n++] = 0x00; q[n++] = 0x0C;               /* PTR */
-    q[n++] = 0x00; q[n++] = 0x01;               /* IN  */
+    size_t n = ptr_query(q, sizeof(q));
+    if (n == 0) { close(sock); return 0; }
 
     struct sockaddr_in to;
     memset(&to, 0, sizeof(to));
@@ -100,25 +176,11 @@ static size_t mdns_peer_ids(char ids[][QZ_MAX_ID], size_t max_ids, unsigned seco
         uint8_t buf[2048];
         ssize_t got = recvfrom(sock, buf, sizeof(buf), 0, NULL, NULL);
         if (got <= 0) continue;
-        static const char *prefixes[] = { "acbm-", "acbl-" };
-        for (size_t k = 0; k < 2 && found < max_ids; k++) {
-            size_t pl = strlen(prefixes[k]);
-            for (size_t i = 0; i + pl < (size_t)got && found < max_ids; i++) {
-                if (memcmp(buf + i, prefixes[k], pl) != 0) continue;
-                char id[QZ_MAX_ID];
-                size_t j = 0;
-                while (i + j < (size_t)got && j + 1 < sizeof(id)) {
-                    uint8_t c = buf[i + j];
-                    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) break;
-                    id[j++] = (char)c;
-                }
-                id[j] = '\0';
-                if (j <= pl) continue;
-                bool dup = false;
-                for (size_t d = 0; d < found; d++) if (strcmp(ids[d], id) == 0) dup = true;
-                if (!dup) snprintf(ids[found++], QZ_MAX_ID, "%s", id);
-            }
-        }
+        char id[QZ_MAX_ID];
+        if (scrape_id(buf, (size_t)got, id, sizeof(id)) != 0) continue;
+        bool dup = false;
+        for (size_t d = 0; d < found; d++) if (strcmp(ids[d], id) == 0) dup = true;
+        if (!dup) snprintf(ids[found++], QZ_MAX_ID, "%s", id);
     }
     close(sock);
     return found;
@@ -267,10 +329,13 @@ int qz_mdns_scan(qz_ctx_t *ctx, unsigned seconds)
     for (size_t i = 0; i < nhits && ctx->board_count < QZ_MAX_BOARDS; i++) {
         qz_board_t *b = &ctx->boards[ctx->board_count++];
         memset(b, 0, sizeof(*b));
-        /* One responder and exactly one name from mDNS: pair them. With several of either,
-         * the id is left blank — `discover` fills it in from the announce once connected,
-         * which is authoritative. */
-        if (nids == 1 && nhits == 1) snprintf(b->peer_id, sizeof(b->peer_id), "%s", ids[0]);
+        /* Ask THIS address who it is (unicast mDNS). Falls back to the old pairing rule —
+         * one name, one address, so they must belong together — and finally leaves the id
+         * blank, which `discover` fills in from the announce once connected. */
+        if (peer_id_unicast(hits[i], b->peer_id, sizeof(b->peer_id), 700) != 0 &&
+            nids == 1 && nhits == 1) {
+            snprintf(b->peer_id, sizeof(b->peer_id), "%s", ids[0]);
+        }
         snprintf(b->addr, sizeof(b->addr), "tls/%s:%d", hits[i], ZENOH_PORT);
         b->last_seen_ms = qz_now_ms();
     }
@@ -291,6 +356,13 @@ int qz_mdns_scan(qz_ctx_t *ctx, unsigned seconds)
             snprintf(ctx->board, sizeof(ctx->board), "%s", ctx->boards[0].peer_id);
         qz_log("SELECT", "endpoint=%s%s%s", ctx->endpoint,
                ctx->board[0] ? "  board=" : "", ctx->board[0] ? ctx->board : "");
+    } else if (ctx->board_count > 1 && ctx->endpoint[0] == '\0') {
+        /* Several boards is a normal bench now (two physical ACB-Ms, 2026-08-21). Auto-picking
+         * one would silently address the wrong board, so say what was found and how to choose
+         * — `connect` takes either form. */
+        qz_log("SELECT", "%zu boards found — choose one: `connect %s` (or `connect %s`)",
+               ctx->board_count, ctx->boards[0].addr,
+               ctx->boards[0].peer_id[0] ? ctx->boards[0].peer_id : "<peer-id>");
     }
     return (int)ctx->board_count;
 }
