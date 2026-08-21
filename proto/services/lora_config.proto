@@ -31,19 +31,38 @@ package ce.embedded.lora.v1;
                                           // Definitions
                                           // ---------------------------------------------------------------------------
 
-                                          // Which field of a device's frame this point carries. Values 1..6 are the
-                                          // Droplet payload (see the board's decoder: bytes 4..12 of the decrypted
-                                          // frame); RSSI/SNR are radio metadata stamped by the receiver, not payload.
+                                          // Which field of a device's frame this point carries. A field is a decoded
+                                          // TLV value of the sensor's payload, NOT an offset: the products in this
+                                          // family (Droplet V2, optical power meter) send different keys in different
+                                          // orders, and the board maps each key to the field below. RSSI/SNR/
+                                          // PACKET_COUNT are radio metadata stamped by the receiver, not payload.
+                                          //
+                                          // A device only ever populates the fields it actually transmits; a point
+                                          // bound to a field its device never sends stays Q_FAULT ("never heard"),
+                                          // which is the intended way to notice a wrong pick.
                                           enum LoraField {
                                             FIELD_UNSPECIFIED = 0;
-                                            FIELD_TEMPERATURE = 1;   // degrees C   (raw u16 / 100)
-                                            FIELD_PRESSURE    = 2;   // kPa         (raw u16 / 100)
-                                            FIELD_HUMIDITY    = 3;   // percent     (raw u16 / 100)
-                                            FIELD_LUX         = 4;   // lux         (raw u16 / 100)
-                                            FIELD_BATTERY     = 5;   // volts       (raw u8 * 0.02)
-                                            FIELD_PACKET_COUNT = 6;  // frames received since provision/reset
+                                            FIELD_TEMPERATURE = 1;   // degrees C   (Droplet V2)
+                                            FIELD_PRESSURE    = 2;   // kPa         (reserved, no product sends it yet)
+                                            FIELD_HUMIDITY    = 3;   // percent     (Droplet V2)
+                                            FIELD_LUX         = 4;   // lux
+                                            FIELD_BATTERY     = 5;   // volts       (whole family)
+                                            FIELD_PACKET_COUNT = 6;  // frames RECEIVED since provision/reset (board-side)
                                             FIELD_RSSI        = 7;   // dBm, receiver-stamped
                                             FIELD_SNR         = 8;   // dB, receiver-stamped
+                                            // Cumulative pulse total of the optical power meter. Carried as a float
+                                            // like every other point, so it counts single pulses exactly up to 2^24
+                                            // (16,777,216) and quantises above that — the board logs the exact u64.
+                                            FIELD_PULSE_COUNT = 9;
+                                            // The DEVICE's own transmit counter, as opposed to FIELD_PACKET_COUNT
+                                            // which counts what arrived. The difference between the two is the link
+                                            // loss rate.
+                                            FIELD_PACKET_ID   = 10;
+                                            // The device's own transmit period in seconds, as it reports it. Not
+                                            // board configuration — the sensor decides, and this is the only way
+                                            // the host learns how often it is supposed to hear from it (which is
+                                            // what makes a STALE quality interpretable rather than alarming).
+                                            FIELD_INTERVAL    = 11;
                                             // Actuator channels (valve) land in a later revision; they will extend this
                                             // enum rather than introduce a second addressing scheme.
                                           }
